@@ -9,25 +9,40 @@ permissions:
 concurrency:
   group: "pages"
   cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Use Node 22 (matches your local) and cache npm
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
+          cache: npm
+          cache-dependency-path: letterslide/package-lock.json
+
+      # Run npm in the letterslide subfolder
       - run: npm ci
+        working-directory: letterslide
       - run: npm run build
+        working-directory: letterslide
+
+      # SPA fallback (optional but recommended)
+      - run: cp letterslide/dist/index.html letterslide/dist/404.html
+
+      # Upload the built site (path is from repo root)
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: letterslide/dist
+
   deploy:
+    needs: build
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    needs: build
-    runs-on: ubuntu-latest
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
