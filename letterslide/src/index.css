@@ -1,0 +1,15 @@
+/* src/index.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Minimal base reset that plays nicely with our in-app dark mode */
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    @apply antialiased;
+    margin: 0;
+    /* Let the app control colors; provide sensible defaults */
+    @apply bg-white text-neutral-900 dark:bg-slate-900 dark:text-slate-100;
+  }
+}
