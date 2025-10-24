@@ -1,907 +1,749 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
-// =============================
-// Letter Slide – React Starter with True Dark Mode + Super Difficult mode
-// Fixes and features:
-// - Guards against undefined tiles during initial render
-// - Safe top-row computation & safer board construction
-// - True dark mode with system detection and manual toggle
-// - NEW: Super Difficult mode with click-to-type guesses & Wordle-like feedback
-// - Syntax-safe JSX quotes
-// - Lightweight dev tests (+ a few extras)
-// =============================
+// =============================================================
+// Letter Slide — Single Mode (Free Solve, Any Row)
+// - Board has N rows; each row r has a hidden real word of length N
+// - The multiset of all letters on the board equals the letters of all row words
+// - Swap ANY two tiles (click-select twice, or drag one onto another)
+// - Coloring is LIVE and duplicate-safe:
+//     • green  = letter sits in the correct cell (correct row AND correct column)
+//     • orange = letter belongs to this row but wrong column (row match)
+//     • yellow = letter belongs to this column but wrong row (column match)
+//     • gray   = letter belongs to neither the row nor the column
+//   Priority: green > orange > yellow > gray. Duplicates are handled by counts.
+// - Rows can be solved in ANY order; a solved row locks (cannot move its tiles)
+// - Win when all rows are solved OR you run out of meter (0 = out of time)
+// - Mobile friendly: drag-to-swap, FLIP animation, light/dark theme
+// =============================================================
 
-// --- Types
-export type Mode = "easy" | "hard" | "super";
+// ---------- Types
 export type Theme = "system" | "light" | "dark";
 
-type Tile = {
-  id: number; // unique instance id (important for duplicate letters)
-  char: string; // A-Z or "" for blank
-  isTarget: boolean; // one of the letters that must live in the top row
-  targetCol?: number; // only for target letters: which column they ultimately belong to (0-indexed)
-};
+type Tile = { id: number; char: string };
+export type Hint = "g" | "o" | "y" | "x"; // green, orange(row), yellow(col), gray
 
-type GameConfig = {
-  size: number; // e.g., 3..6
-  mode: Mode;
-  word?: string; // optional for EASY; ignored if HARD/SUPER (word will be chosen)
-};
+type RowSecret = { word: string };
 
-// --- Small word lists by length (swap in a proper dictionary later)
+type Dir = "L" | "R" | "U" | "D"; // for animation tests
+
+// ---------- Tunables (scoring / meter)
+const SCORE_START = 100;           // initial meter (also the visual bar cap)
+const SCORE_CAP = 100;             // max shown in the bar (we clamp for clarity)
+const DECAY_PER_SEC = 2;           // continuous decay per second
+const MOVE_PENALTY = 2;            // cost per swap
+const GREEN_BONUS = 5;             // reward when a tile becomes green for the first time
+const ROW_SOLVED_BONUS_PER_SIZE = 5; // per-size bonus when a row locks (5 * size)
+
+// ---------- Word list (expanded; no proper nouns)
 const WORDS: Record<number, string[]> = {
-  3: ["CAT", "SUN", "MAP", "BOX", "HAT"],
-  4: ["CODE", "GAME", "PLAY", "WORD", "MATH"],
-  5: ["APPLE", "LEVEL", "QUEST", "TRAIL", "SHIFT"],
-  6: ["FLOWER", "PUZZLE", "BINARY", "MARKET", "BRIDGE"],
+  3: [
+    "CAT","DOG","SUN","MAP","BOX","HAT","CAR","BUS","ANT","BEE","FOX","OWL","BAT","JAR","KEY","LIP","MUG","PEN","RUG","EGG"
+  ],
+  4: [
+    "CODE","GAME","PLAY","WORD","MATH","TREE","LEAF","FISH","BIRD","LION","WOLF","FIRE","WIND","SNOW","RAIN","STAR","MOON","SHIP","ROAD","BOOK","DOOR","MILK","BREAD","CORN"
+  ],
+  5: [
+    "APPLE","LEVEL","QUEST","TRAIL","SHIFT","ABOUT","AFTER","AGAIN","OTHER","HEART","PLANT","GRAPE","MANGO","TIGER","RIVER","MUSIC","LIGHT","SOUND","BREAD","WATER","EARTH","WORLD","SMILE","CHAIR","TABLE","POINT","RIGHT","UNDER","GREEN","BROWN","BLACK","WHITE","STONE","FIELD","HOUSE","BRICK","PLANE","TRAIN","CLOUD","STORM","SHINE","QUIET","NOISE","HAPPY","TIMES","QUICK","SWEET","SHARP","ROUND"
+  ],
+  6: [
+    "FLOWER","PUZZLE","BINARY","MARKET","BRIDGE","ORANGE","PURPLE","YELLOW","SILVER","NATURE","RIVERS","GALAXY","PLANET","STREAM","THINGS","LETTER","SPIRIT","WINDOW","GARDEN","SCHOOL","FRIEND","ANIMAL","PEOPLE","FUTURE","PENCIL","NUMBER","POCKET","CAMERA","PILLOW","MARKER","BUTTON","CHERRY","BANANA","BOTTLE","FOLLOW","SPRING","SUMMER","AUTUMN","WINTER","CANDLE","CRAYON","DANCER","ENGINE","FABRIC","GOBLET","HANDLE","INSECT"
+  ]
 };
 
-// --- Helpers
+// ---------- Helpers
 const rand = (n: number) => Math.floor(Math.random() * n);
+const idx = (r: number, c: number, size: number) => r * size + c;
+const rc = (i: number, size: number) => ({ r: Math.floor(i / size), c: i % size });
+const swapArr = <T,>(a: T[], i: number, j: number) => { const t = a[i]; a[i] = a[j]; a[j] = t; };
 
-// Super mode gating: sliding allowed only after a full-length guess is entered
-export function canSlideInSuper(guessLen: number, size: number): boolean {
-  return guessLen >= size;
-}
-
-// Guess helpers for Super mode (pure, testable)
-export function appendGuess(current: string, ch: string, size: number): string {
-  const clean = (ch || "").toUpperCase().replace(/[^A-Z]/g, "");
-  return (current + clean).slice(0, size);
-}
-export function backspaceGuess(current: string): string {
-  return current.length ? current.slice(0, -1) : "";
-}
-
-function pickWord(size: number, preferred?: string): string {
-  const up = preferred?.toUpperCase();
-  if (up && up.length === size && /^[A-Z]+$/.test(up)) return up;
-  const bank = WORDS[size] ?? ["A".repeat(size)];
-  return bank[rand(bank.length)];
-}
-
-function idx(r: number, c: number, size: number) {
-  return r * size + c;
-}
-
-function rc(i: number, size: number) {
-  return { r: Math.floor(i / size), c: i % size };
-}
-
-// Helper: does the current top row already contain any letter in the correct spot?
-function hasAnyTopRowGreen(board: Tile[], size: number, secret: string): boolean {
-  for (let c = 0; c < size; c++) {
-    const t = board[idx(0, c, size)];
-    if (t && t.char === secret[c]) return true;
-  }
-  return false;
-}
-
-// For SUPER mode we may want to avoid spoilers: keep shuffling until no
-// top-row position matches its secret letter (bounded tries to avoid loops).
-function ensureNoInitialTopRowGreens(board: Tile[], size: number, secret: string) {
-  let tries = 0;
-  const maxTries = 200;
-  while (tries < maxTries && hasAnyTopRowGreen(board, size, secret)) {
-    // Do a handful of additional random moves to shake the top row
-    shuffleByRandomMoves(board, size, Math.max(size * 2, rand(size * size)));
-    tries++;
-  }
-}
-
-// Build a solved board safely and fully-initialized
-function makeSolvedBoard(size: number, _mode: Mode, maybeWord?: string): { word: string; board: Tile[] } {
-  const word = pickWord(size, maybeWord);
-  const targetTiles: Tile[] = [...word].map((ch, i) => ({ id: i + 1, char: ch, isTarget: true, targetCol: i }));
-
-  const total = size * size;
-  const fillerCount = Math.max(0, total - targetTiles.length - 1); // -1 for the blank
-  const fillers: Tile[] = Array.from({ length: fillerCount }, (_, k) => ({
-    id: size + 1 + k,
-    char: String.fromCharCode(65 + rand(26)),
-    isTarget: false,
-  }));
-
-  const blank: Tile = { id: 0, char: "", isTarget: false };
-
-  // Start from a guaranteed full array
-  const board: Tile[] = [];
-  // Top row = word
-  for (let c = 0; c < size; c++) board.push(targetTiles[c]);
-  // Fill remaining non-blank
-  const pool = [...fillers];
-  while (board.length < total - 1) {
-    const next = pool.pop();
-    board.push(next ?? { id: 10_000 + board.length, char: String.fromCharCode(65 + rand(26)), isTarget: false });
-  }
-  // Last cell blank
-  board.push(blank);
-
-  return { word, board };
-}
-
-function neighborsOfBlank(board: Tile[], size: number): number[] {
-  const b = board.findIndex((t) => t && t.id === 0);
-  if (b < 0) return [];
-  const { r, c } = rc(b, size);
-  const n: number[] = [];
-  if (r > 0) n.push(idx(r - 1, c, size));
-  if (r < size - 1) n.push(idx(r + 1, c, size));
-  if (c > 0) n.push(idx(r, c - 1, size));
-  if (c < size - 1) n.push(idx(r, c + 1, size));
-  return n;
-}
-
-function swap(board: Tile[], i: number, j: number) {
-  const tmp = board[i];
-  board[i] = board[j];
-  board[j] = tmp;
-}
-
-function shuffleByRandomMoves(board: Tile[], size: number, steps: number) {
-  let prevBlank = -1;
-  for (let s = 0; s < steps; s++) {
-    const b = board.findIndex((t) => t && t.id === 0);
-    if (b < 0) return; // safety guard
-    const nbs = neighborsOfBlank(board, size).filter((i) => i !== prevBlank);
-    if (nbs.length === 0) return; // safety guard
-    const choice = nbs[rand(nbs.length)];
-    swap(board, b, choice);
-    prevBlank = b; // prevent immediate backtrack
-  }
-}
-
-// SAFE top-row string builder: never assumes tiles exist
-function topRowString(board: Tile[], size: number) {
+function rowString(board: Tile[], size: number, r: number) {
   let s = "";
-  for (let c = 0; c < size; c++) {
-    const t = board[idx(0, c, size)];
-    s += t && typeof t.char === "string" ? t.char : " ";
-  }
+  for (let c = 0; c < size; c++) s += board[idx(r, c, size)]?.char ?? " ";
   return s;
 }
 
-function manhattan(a: { r: number; c: number }, b: { r: number; c: number }) {
-  return Math.abs(a.r - b.r) + Math.abs(a.c - b.c);
+function pickWord(size: number, preferred?: string) {
+  const up = preferred?.toUpperCase();
+  if (up && up.length === size && /^[A-Z]+$/.test(up)) return up;
+  const pool = WORDS[size] ?? ["A".repeat(size)];
+  return pool[rand(pool.length)];
 }
 
-// Lower-bound heuristic on moves needed for just the target tiles (ignores blank constraints)
-function targetManhattanSum(board: Tile[], size: number) {
-  let sum = 0;
-  for (let i = 0; i < board.length; i++) {
-    const t = board[i];
-    if (!t || !t.isTarget || t.targetCol == null) continue;
-    const cur = rc(i, size);
-    const goal = { r: 0, c: t.targetCol };
-    sum += manhattan(cur, goal);
+// Campaign words and board
+function chooseCampaignWords(size: number, preferredFirst?: string): string[] {
+  const first = pickWord(size, preferredFirst);
+  const pool = WORDS[size] ?? [first];
+  const words: string[] = [first];
+  while (words.length < size) words.push(pool[rand(pool.length)]);
+  return words;
+}
+
+function makeCampaignBoard(size: number, maybeWord?: string): { words: string[]; board: Tile[] } {
+  const words = chooseCampaignWords(size, maybeWord);
+  const board: Tile[] = [];
+  for (let r = 0; r < size; r++) {
+    const w = words[r];
+    for (let c = 0; c < size; c++) board.push({ id: r * size + c + 1, char: w[c] });
   }
-  return sum;
+  shuffleByAdjSwaps(board, size, Math.max(300, size * size * 10));
+  return { words, board };
 }
 
-// Column feedback for HARD mode: for target tiles, are they in the correct column?
-function isCorrectColumn(tile: Tile | undefined, i: number, size: number) {
-  if (!tile || !tile.isTarget || tile.targetCol == null) return false;
-  const { c } = rc(i, size);
-  return c === tile.targetCol;
+// Shuffle by adjacent swaps (no blank tile)
+function shuffleByAdjSwaps(board: Tile[], size: number, steps: number) {
+  for (let s = 0; s < steps; s++) {
+    const a = rand(board.length);
+    const r = Math.floor(a / size), c = a % size;
+    const neigh: number[] = [];
+    if (r > 0) neigh.push(idx(r - 1, c, size));
+    if (r < size - 1) neigh.push(idx(r + 1, c, size));
+    if (c > 0) neigh.push(a - 1);
+    if (c < size - 1) neigh.push(a + 1);
+    const b = neigh[rand(neigh.length)];
+    swapArr(board, a, b);
+  }
 }
 
-// Render helpers
-function makePlaceholder(i: number): Tile {
-  return { id: -1_000 - i, char: "", isTarget: false };
+// ---------- Duplicate-safe color evaluation (global, any-order rows)
+// Priority: green > orange(row) > yellow(col) > gray
+function computeMarks(board: Tile[], size: number, secrets: RowSecret[], locked: Set<number>): Map<number, Hint> {
+  const total = size * size;
+  const marks = new Map<number, Hint>();
+
+  // Greens first
+  const rowNeed: Array<Record<string, number>> = Array.from({ length: size }, (_, r) => {
+    const need: Record<string, number> = {};
+    const w = secrets[r].word;
+    for (let k = 0; k < size; k++) need[w[k]] = (need[w[k]] || 0) + 1;
+    return need;
+  });
+  const colNeed: Array<Record<string, number>> = Array.from({ length: size }, (_, c) => {
+    const need: Record<string, number> = {};
+    for (let r = 0; r < size; r++) {
+      const ch = secrets[r].word[c];
+      need[ch] = (need[ch] || 0) + 1;
+    }
+    return need;
+  });
+
+  // pass 1: mark greens and decrement both row & col needs
+  for (let i = 0; i < total; i++) {
+    const t = board[i]; if (!t) continue;
+    const { r, c } = rc(i, size);
+    if (secrets[r].word[c] === t.char) {
+      marks.set(t.id, "g");
+      rowNeed[r][t.char]!--;
+      colNeed[c][t.char]!--;
+    }
+  }
+
+  // pass 2: row oranges (correct row, wrong col), skip rows already locked (they are all greens anyway)
+  for (let r = 0; r < size; r++) {
+    if (locked.has(r)) continue;
+    for (let c = 0; c < size; c++) {
+      const i = idx(r, c, size); const t = board[i]; if (!t) continue;
+      if (marks.has(t.id)) continue; // already green
+      const ch = t.char;
+      // letter is wanted by this row (somewhere) and column isn't the right one for this row
+      if ((rowNeed[r][ch] || 0) > 0 && secrets[r].word[c] !== ch) {
+        marks.set(t.id, "o");
+        rowNeed[r][ch]!--;
+      }
+    }
+  }
+
+  // pass 3: column yellows (correct column, wrong row)
+  for (let c = 0; c < size; c++) {
+    for (let r = 0; r < size; r++) {
+      const i = idx(r, c, size); const t = board[i]; if (!t) continue;
+      if (marks.has(t.id)) continue; // green/orange already
+      const ch = t.char;
+      if ((colNeed[c][ch] || 0) > 0 && secrets[r].word[c] !== ch) {
+        marks.set(t.id, "y");
+        colNeed[c][ch]!--;
+      }
+    }
+  }
+
+  // pass 4: the rest are gray
+  for (let i = 0; i < total; i++) {
+    const t = board[i]; if (!t) continue;
+    if (!marks.has(t.id)) marks.set(t.id, "x");
+  }
+
+  return marks;
 }
 
-// System dark-mode hook
+// Count new tile IDs that became green (and aren't rewarded yet)
+function newlyGreenIDs(prev: Map<number, Hint>, next: Map<number, Hint>, already: Set<number>): number[] {
+  const gained: number[] = [];
+  next.forEach((h, id) => {
+    if (h === 'g') {
+      const before = prev.get(id);
+      if (before !== 'g' && !already.has(id)) gained.push(id);
+    }
+  });
+  return gained;
+}
+
+// ---------- Dark mode (system-aware)
 function usePrefersDark(): boolean {
   const [prefersDark, setPrefersDark] = useState(false);
   useEffect(() => {
-    const m = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = () => setPrefersDark(!!m && m.matches);
-    onChange();
-    if (!m) return;
-    if (m.addEventListener) m.addEventListener("change", onChange);
-    else m.addListener(onChange);
-    return () => {
-      if (m.removeEventListener) m.removeEventListener("change", onChange);
-      else m.removeListener(onChange);
-    };
+    const m = window.matchMedia("(prefers-color-scheme: dark)");
+    const on = () => setPrefersDark(!!m.matches);
+    on();
+    if (typeof m.addEventListener === "function") {
+      m.addEventListener("change", on);
+      return () => m.removeEventListener("change", on);
+    } else if (typeof (m as any).addListener === "function") {
+      (m as any).addListener(on);
+      return () => (m as any).removeListener(on);
+    }
+    return () => {};
   }, []);
   return prefersDark;
 }
 
-// --- Super mode evaluation (Wordle-like)
-type Hint = "g" | "y" | "x"; // green (right column), yellow (present), gray (absent)
-export type HintMap = Record<number, Hint>;
+// ======================================================
+// App (single mode — free solve)
+// ======================================================
+export default function App() {
+  // Core state
+  const [size, setSize] = useState(5);
 
-// SUPER mode evaluator that colors ONLY the tiles the player clicked.
-// Rules:
-//  • Green: clicked tile is a TARGET tile and is currently in its correct column.
-//  • Yellow: clicked tile is a TARGET tile, letter appears in the secret but the tile is not in its correct column (dup letters respect counts).
-//  • Gray: clicked tile is not a target tile for the secret (or letter count already exhausted).
-function evaluateGuessFromPath(board: Tile[], size: number, secret: string, path: number[]): HintMap {
-  // Policy B (column-credit):
-  //  - Interpret the guess as letters per column (from the clicked path).
-  //  - Greens: for column i, if guessed letter equals secret[i] and the target tile for i currently sits in column i.
-  //            Color THAT target tile green (even if a different copy was clicked).
-  //  - Yellows: for remaining guessed letters that exist elsewhere in the secret (respecting duplicate counts),
-  //             color one unassigned TARGET tile with that letter yellow.
-  //  - Grays: tiles the player clicked that didn't receive green/yellow become 'x' (we render these as a ring only).
-  const hints: HintMap = {};
-  if (!secret || path.length !== size) return hints;
+  // Campaign-first init
+  const campInit = useMemo(() => makeCampaignBoard(5), []);
+  const [board, setBoard] = useState<Tile[]>((() => campInit.board));
+  const [rowSecrets, setRowSecrets] = useState<RowSecret[]>((() => campInit.words.map((w) => ({ word: w }))));
 
-  // Build the typed guess by reading letters at clicked positions
-  const guessLetters: string[] = path.map((pos) => (board[pos]?.char || "").toUpperCase());
+  // Rows solved can be in ANY order
+  const [lockedRows, setLockedRows] = useState<Set<number>>(new Set());
 
-  // Remaining counts for each letter in the secret
-  const counts: Record<string, number> = {};
-  for (let i = 0; i < size; i++) counts[secret[i]] = (counts[secret[i]] || 0) + 1;
-
-  // Helper: locate the target tile object for a given column (by intended targetCol)
-  const targetTileForCol: (col: number) => Tile | undefined = (col) =>
-    board.find((t) => t && t.isTarget && t.targetCol === col && t.char === secret[col]);
-
-  const assignedTileIds = new Set<number>();
-
-  // Pass 1: GREENS by column credit
-  for (let col = 0; col < size; col++) {
-    const gch = guessLetters[col];
-    if (gch !== secret[col]) continue;
-    const t = targetTileForCol(col);
-    if (!t) continue;
-    const tIndex = board.findIndex((tt) => tt.id === t.id);
-    if (tIndex < 0) continue;
-    const { c } = rc(tIndex, size);
-    if (c === col && (counts[gch] || 0) > 0) {
-      hints[t.id] = "g";
-      assignedTileIds.add(t.id);
-      counts[gch]! -= 1;
-    }
-  }
-
-  // Pass 2: YELLOWS for remaining guessed letters that still have counts
-  // We assign to any unassigned TARGET tile with that letter.
-  for (let col = 0; col < size; col++) {
-    const gch = guessLetters[col];
-    if ((counts[gch] || 0) <= 0) continue;
-    // Skip if already satisfied by a green in this column
-    if (gch === secret[col]) {
-      const t = targetTileForCol(col);
-      if (t && hints[t.id] === "g") continue;
-    }
-    const candidate = board.find(
-      (t) => t && t.isTarget && !assignedTileIds.has(t.id) && t.char === gch
-    );
-    if (candidate) {
-      hints[candidate.id] = "y";
-      assignedTileIds.add(candidate.id);
-      counts[gch]! -= 1;
-    }
-  }
-
-  // Pass 3: GRAYS for clicked tiles that weren't assigned (we render these as rings only)
-  for (const pos of path) {
-    const t = board[pos];
-    if (!t || t.id === 0) continue;
-    if (hints[t.id] === undefined) hints[t.id] = "x";
-  }
-
-  return hints;
-}
-
-// NEW: Global highlight evaluator for Policy B' (set-based, column-credit greens + global yellows)
-function evaluateGuessGlobal(board: Tile[], size: number, secret: string, guessRaw: string): HintMap {
-  const hints: HintMap = {};
-  const guess = guessRaw.toUpperCase().replace(/[^A-Z]/g, "");
-  // Do not color anything until there is at least one letter in the guess
-  if (!secret || guess.length === 0) return hints;
-
-  const guessSet = new Set<string>([...guess]);
-  const secretSet = new Set<string>([...secret]);
-  const includeSet = new Set<string>([...guessSet].filter((ch) => secretSet.has(ch)));
-  const excludeSet = new Set<string>([...guessSet].filter((ch) => !secretSet.has(ch)));
-
-  for (let i = 0; i < board.length; i++) {
-    const t = board[i];
-    if (!t || t.id === 0) continue;
-    const { r, c } = rc(i, size);
-    // Green if the letter that currently sits in the TOP ROW column matches the secret for that column
-    if (r === 0 && t.char === secret[c]) {
-      hints[t.id] = "g";
-      continue;
-    }
-    if (excludeSet.has(t.char)) {
-      hints[t.id] = "x";
-      continue;
-    }
-    if (includeSet.has(t.char)) {
-      hints[t.id] = "y";
-    }
-  }
-
-  return hints;
-}
-
-// Live upgrade logic for Super mode: promote to green when a tile sits in its correct TOP-ROW column
-function superEffectiveHint(
-  tile: Tile,
-  index: number,
-  size: number,
-  hints: HintMap,
-  secret: string
-): Hint | undefined {
-  const { r, c } = rc(index, size);
-  if (r === 0 && tile.char === secret[c]) return "g";
-  const h = hints[tile.id];
-  if (!h) return undefined;
-  if (h === "g") return "g";
-  if (h === "y") return "y";
-  if (h === "x") return "x";
-  return undefined;
-}
-
-// --- React Component
-export default function LetterSlideApp({ initial }: { initial?: Partial<GameConfig> }) {
-  const initialSize = initial?.size ?? 5;
-  const initialMode: Mode = initial?.mode ?? "super";
-
-  const [size, setSize] = useState(initialSize);
-  const [mode, setMode] = useState<Mode>(initialMode);
-  const [theme, setTheme] = useState<Theme>("system");
-  const prefersDark = usePrefersDark();
-  const isDark = theme === "dark" || (theme === "system" && prefersDark);
-
-  const [secret, setSecret] = useState<string>("");
-  const [board, setBoard] = useState<Tile[]>([]);
+  // Game meta
   const [moves, setMoves] = useState(0);
+  const [seconds, setSeconds] = useState(0);
   const [running, setRunning] = useState(false);
-  const [secs, setSecs] = useState(0);
   const [won, setWon] = useState(false);
-
-  // Super mode state
-  const [guess, setGuess] = useState("");
-  const [guessPath, setGuessPath] = useState<number[]>([]);
-  const [hints, setHints] = useState<HintMap>({});
-  const [missLetters, setMissLetters] = useState<Set<string>>(new Set());
-  const [showIntro, setShowIntro] = useState<boolean>(true);
-  const [spinning, setSpinning] = useState(false);
-  const [spinTick, setSpinTick] = useState(0);
-  const [hasGuessedOnce, setHasGuessedOnce] = useState(false);
-
+  const [lost, setLost] = useState(false);
+  const [rowCleared, setRowCleared] = useState<number | null>(null);
+  const [hideWin, setHideWin] = useState(false);
+  const [celebrateRow, setCelebrateRow] = useState<number | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [showIntro, setShowIntro] = useState<boolean>(() => {
+    try { return localStorage.getItem("ls_intro_v1") ? false : true; } catch { return true; }
+  });
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const tileRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
+  const [flip, setFlip] = useState<Map<number, { dx: number; dy: number }>>(new Map());
+  const initialTouch = typeof window !== "undefined" && (("ontouchstart" in window) || (navigator as any).maxTouchPoints > 0);
+  const [isTouch, setIsTouch] = useState(initialTouch);
   const timerRef = useRef<number | null>(null);
 
-  // (Re)start a game
-  const startGame = (desiredWord?: string) => {
-    const { word, board } = makeSolvedBoard(size, mode, desiredWord);
-    shuffleByRandomMoves(board, size, Math.max(50, size * size * 20));
-    if (mode === "easy" && topRowString(board, size).trim() === word) {
-      shuffleByRandomMoves(board, size, 30);
-    }
-    // NEW: For SUPER, avoid initial spoilers — no greens in the top row
-    if (mode === "super") {
-      ensureNoInitialTopRowGreens(board, size, word);
-    }
+  useEffect(() => { setIsTouch((("ontouchstart" in window) || (navigator as any).maxTouchPoints > 0)); }, []);
 
-    setSecret(word);
-    setBoard([...board]);
-    setMoves(0);
-    setSecs(0);
-    setWon(false);
-    setRunning(false);
-    setGuess("");
-    setGuessPath([]);
-    setHints({});
-    setMissLetters(new Set());
-    setHasGuessedOnce(false);
-    if (timerRef.current) window.clearInterval(timerRef.current);
+  const prefersDark = usePrefersDark();
+  const [theme, setTheme] = useState<Theme>("system");
+  const isDark = theme === "dark" || (theme === "system" && !isTouch && prefersDark);
+
+  useEffect(() => { if (!showIntro) try { localStorage.setItem("ls_intro_v1", "1"); } catch {} }, [showIntro]);
+
+  // ===== Scoring / Meter =====
+  const [score, setScore] = useState<number>(SCORE_START);
+  const rewardedGreen = useRef<Set<number>>(new Set());
+  const [scoreFlash, setScoreFlash] = useState<{v:number,key:number}|null>(null);
+  const flash = (delta:number) => {
+    if (delta === 0) return;
+    setScoreFlash({ v: delta, key: Math.random() });
+    const id = window.setTimeout(() => setScoreFlash(null), 700);
+    return () => window.clearTimeout(id);
   };
 
+  // Meter decay every second while running
   useEffect(() => {
-    startGame(initial?.word);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [size, mode]);
+    if (!running || won || lost) return;
+    const id = window.setInterval(() => {
+      setSeconds((s) => s + 1);
+      setScore((sc) => {
+        const next = Math.max(0, sc - DECAY_PER_SEC);
+        if (next !== sc) flash(-DECAY_PER_SEC);
+        return next;
+      });
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [running, won, lost]);
 
-  // intro overlay visibility follows mode
+  // Out of time
   useEffect(() => {
-    setShowIntro(mode === "super");
-  }, [mode]);
-
-  // spinning animation driver
-  useEffect(() => {
-    if (!spinning) return;
-    const intId = window.setInterval(() => setSpinTick((t) => t + 1), 60);
-    const toId = window.setTimeout(() => {
-      setSpinning(false);
-      window.clearInterval(intId);
-    }, 900);
-    return () => {
-      window.clearInterval(intId);
-      window.clearTimeout(toId);
-    };
-  }, [spinning]);
-
-  // timer
-  useEffect(() => {
-    if (!running || won) return;
-    timerRef.current = window.setInterval(() => setSecs((s) => s + 1), 1000);
-    return () => {
-      if (timerRef.current) window.clearInterval(timerRef.current);
-    };
-  }, [running, won]);
-
-  const onTileClick = (i: number) => {
-    if (won) return;
-    if (board.length !== size * size) return;
-
-    // SUPER: clicks build the guess until it's full; sliding is disabled until then
-    if (mode === "super" && !canSlideInSuper(guess.length, size)) {
-      const t = board[i];
-      if (!t || t.id === 0) return; // ignore blank
-      const newPath = [...guessPath, i];
-      const next = appendGuess(guess, t.char, size);
-      setGuess(next);
-      setGuessPath(newPath);
-      // First tap starts coloring for the session
-      if (!hasGuessedOnce && next.length > 0) setHasGuessedOnce(true);
-      // Incremental coloring as letters are entered
-      setHints(evaluateGuessGlobal(board, size, secret, next));
-      // Persistently gray letters that aren't in the secret
-      if (!secret.includes(t.char)) {
-        setMissLetters((prev) => new Set([...Array.from(prev), t.char]));
-      }
-      if (next.length === size) {
-        setGuessPath([]);
-      }
-      return; // no sliding before first full guess
+    if (!won && score <= 0) {
+      setLost(true);
+      setRunning(false);
     }
+  }, [score, won]);
 
-    // Sliding behavior (all modes, and SUPER after first full guess)
-    const b = board.findIndex((t) => t.id === 0);
-    if (b < 0) return;
-    const { r: br, c: bc } = rc(b, size);
-    const { r: tr, c: tc } = rc(i, size);
-    const isAdj = Math.abs(br - tr) + Math.abs(bc - tc) === 1;
-    if (!isAdj) return;
-    const nextBoard = [...board];
-    swap(nextBoard, b, i);
-    if (!running) setRunning(true);
-    setBoard(nextBoard);
-    setMoves((m) => m + 1);
-  };
+  // Row-cleared detection (any order)
+  useEffect(() => {
+    if (won || lost) return;
+    for (let r = 0; r < size; r++) {
+      if (lockedRows.has(r)) continue;
+      const secret = rowSecrets[r]?.word;
+      if (secret && rowString(board, size, r) === secret) {
+        setRowCleared(r);
+        setRunning(false);
+        break;
+      }
+    }
+  }, [board, rowSecrets, size, lockedRows, won, lost]);
 
-  const goalMet = useMemo(() => {
-    const currentTop = topRowString(board, size);
-    return currentTop === secret; // same win check across modes
-  }, [board, size, secret]);
+  // One-shot celebration + lock row + award bonus + resume
+  useEffect(() => {
+    if (rowCleared != null) {
+      setCelebrateRow(rowCleared);
+      const t = window.setTimeout(() => {
+        setCelebrateRow(null);
+        setLockedRows((prev) => new Set(prev).add(rowCleared));
+        setRowCleared(null);
+        // Award row bonus
+        const bonus = ROW_SOLVED_BONUS_PER_SIZE * size;
+        setScore((s) => Math.min(SCORE_CAP, s + bonus));
+        flash(bonus);
+        setRunning(true);
+      }, 650);
+      return () => window.clearTimeout(t);
+    }
+  }, [rowCleared, size]);
 
   useEffect(() => {
-    if (goalMet && !won) {
+    if (lockedRows.size === size && size > 0) {
       setWon(true);
       setRunning(false);
-      if (timerRef.current) window.clearInterval(timerRef.current);
     }
-  }, [goalMet, won]);
+  }, [lockedRows, size]);
 
-  const targetLowerBound = useMemo(() => targetManhattanSum(board, size), [board, size]);
+  // Marks are derived every render (duplicate-safe, priority g>o>y>x)
+  const marks = useMemo(() => computeMarks(board, size, rowSecrets, lockedRows), [board, size, rowSecrets, lockedRows]);
 
-  // Always render a full grid; if board isn't ready, use placeholders
-  const renderBoard: Tile[] = useMemo(() => {
+  // ---------- Handlers
+  function isRowLocked(r: number) { return lockedRows.has(r) || r === rowCleared; }
+
+  function canSwapIndices(a: number, b: number) {
+    if (a === b) return false;
+    const ra = rc(a, size).r; const rb = rc(b, size).r;
+    if (isRowLocked(ra) || isRowLocked(rb)) return false;
+    return true;
+  }
+
+  function performSwap(a: number, b: number) {
+    const nextBoard = [...board];
+
+    // FLIP capture pre-swap rects
+    const idA = nextBoard[a]?.id; const idB = nextBoard[b]?.id;
+    const elA = idA ? tileRefs.current.get(idA) : null;
+    const elB = idB ? tileRefs.current.get(idB) : null;
+    const rectA = elA?.getBoundingClientRect();
+    const rectB = elB?.getBoundingClientRect();
+
+    // Predict next marks for scoring deltas
+    const nextBoardPreview = [...nextBoard];
+    swapArr(nextBoardPreview, a, b);
+    const nextMarks = computeMarks(nextBoardPreview, size, rowSecrets, lockedRows);
+    const newly = newlyGreenIDs(marks, nextMarks, rewardedGreen.current);
+
+    // Now commit the swap
+    swapArr(nextBoard, a, b);
+    setBoard(nextBoard);
+    setSelectedIndex(null);
+    if (!running) setRunning(true);
+    setMoves((m) => m + 1);
+
+    // Score effects
+    if (MOVE_PENALTY) { setScore((s) => Math.max(0, s - MOVE_PENALTY)); flash(-MOVE_PENALTY); }
+    if (newly.length) {
+      const gain = newly.length * GREEN_BONUS;
+      newly.forEach((id) => rewardedGreen.current.add(id));
+      setScore((s) => Math.min(SCORE_CAP, s + gain));
+      flash(gain);
+    }
+
+    // FLIP animate to new spot (after DOM updates)
+    if (idA && idB && rectA && rectB) {
+      requestAnimationFrame(() => {
+        const elA2 = tileRefs.current.get(idA);
+        const elB2 = tileRefs.current.get(idB);
+        if (elA2 && elB2) {
+          const afterA = elA2.getBoundingClientRect();
+          const afterB = elB2.getBoundingClientRect();
+          const m = new Map<number, { dx: number; dy: number }>();
+          m.set(idA, { dx: rectA.left - afterA.left, dy: rectA.top - afterA.top });
+          m.set(idB, { dx: rectB.left - afterB.left, dy: rectB.top - afterB.top });
+          setFlip(m);
+          requestAnimationFrame(() => setFlip(new Map()));
+        }
+      });
+    }
+  }
+
+  function startGame(newSize = size, maybeWord?: string) {
+    const nextCamp = makeCampaignBoard(newSize, maybeWord);
+    setBoard(nextCamp.board);
+    setSize(newSize);
+
+    setMoves(0);
+    setSeconds(0);
+    setRunning(true);
+    setWon(false);
+    setLost(false);
+    setRowCleared(null);
+    setSelectedIndex(null);
+
+    setRowSecrets(nextCamp.words.map((w) => ({ word: w })));
+    setLockedRows(new Set());
+    rewardedGreen.current = new Set();
+    setScore(SCORE_START);
+    setHideWin(false);
+  }
+
+  function handleTileClick(i: number) {
+    if (won || lost) return;
+    const r = rc(i, size).r;
+    if (isRowLocked(r)) return;
+
+    if (selectedIndex == null) { setSelectedIndex(i); return; }
+    if (selectedIndex === i) { setSelectedIndex(null); return; }
+
+    const rSel = rc(selectedIndex, size).r;
+    if (isRowLocked(rSel)) { setSelectedIndex(i); return; }
+
+    if (canSwapIndices(selectedIndex, i)) performSwap(selectedIndex, i);
+    else setSelectedIndex(i);
+  }
+
+  // ---------- Render data
+  const tilesToRender: Tile[] = useMemo(() => {
     const total = size * size;
     if (board.length === total) return board;
-    return Array.from({ length: total }, (_, i) => board[i] ?? makePlaceholder(i));
+    return Array.from({ length: total }, (_, i) => board[i] ?? { id: -1_000 - i, char: "" });
   }, [board, size]);
 
-  // Palette based on theme
-  const palette = isDark
-    ? {
-        pageBg: "bg-slate-900",
-        pageText: "text-slate-100",
-        controlBg: "bg-slate-800 border-slate-600 text-slate-100 hover:bg-slate-700 active:bg-slate-700",
-        selectBg: "bg-slate-800 border-slate-600 text-slate-100",
-        border: "border-slate-600",
-        tileText: "text-slate-100",
-        tileBlank: "bg-slate-800 border-dashed",
-        tileWrong: "bg-amber-600",
-        tileRight: "bg-emerald-600",
-        tileNeutral: "bg-slate-700",
-        panelBg: "bg-slate-800 border-slate-600",
-        winBg: "bg-emerald-900 border-emerald-700 text-emerald-100",
-        guessMiss: "bg-slate-600",
-      }
-    : {
-        pageBg: "bg-white",
-        pageText: "text-neutral-900",
-        controlBg: "bg-white border-neutral-300 hover:bg-neutral-50 active:bg-neutral-100",
-        selectBg: "bg-white border-neutral-300",
-        border: "border-neutral-300",
-        tileText: "text-neutral-900",
-        tileBlank: "bg-neutral-100 border-dashed",
-        tileWrong: "bg-yellow-300",
-        tileRight: "bg-green-300",
-        tileNeutral: "bg-white",
-        panelBg: "bg-slate-50 border",
-        winBg: "bg-emerald-100 border-emerald-300 text-emerald-900",
-        guessMiss: "bg-neutral-300",
-      };
-
-  // --- Lightweight dev tests (rendered in a collapsible panel)
-  type TestResult = { name: string; passed: boolean; details?: string };
-  const [testResults, setTestResults] = useState<TestResult[] | null>(null);
-
-  const runTests = () => {
-    const results: TestResult[] = [];
-
-    const safeTopRowNoCrash = () => {
-      try {
-        const s = topRowString([], 4);
-        results.push({ name: "topRowString safe on empty board", passed: typeof s === "string" && s.length === 4 });
-      } catch (e) {
-        results.push({ name: "topRowString safe on empty board", passed: false, details: String(e) });
-      }
-    };
-
-    const solvedBoardIsFull = () => {
-      const { board } = makeSolvedBoard(4, "easy", "WORD");
-      const top = topRowString(board, 4);
-      const full = board.length === 16 && board.every((t) => t && typeof t.char === "string");
-      results.push({ name: "makeSolvedBoard produces full board", passed: full && top === "WORD" });
-    };
-
-    const shuffleKeepsChars = () => {
-      const { board } = makeSolvedBoard(5, "easy", "LEVEL");
-      shuffleByRandomMoves(board, 5, 200);
-      const valid = board.length === 25 && board.filter((t) => t.id === 0).length === 1 && board.every((t) => typeof t.char === "string");
-      results.push({ name: "shuffle keeps board integrity", passed: valid });
-    };
-
-    const manhattanNonNegative = () => {
-      const { board } = makeSolvedBoard(3, "easy", "CAT");
-      const h = targetManhattanSum(board, 3);
-      results.push({ name: "targetManhattanSum >= 0", passed: typeof h === "number" && h >= 0 });
-    };
-
-    const correctColumnLogic = () => {
-      const { board } = makeSolvedBoard(3, "easy", "CAT");
-      const ok = [0, 1, 2].every((c) => isCorrectColumn(board[c], c, 3));
-      results.push({ name: "isCorrectColumn true for solved top row", passed: ok });
-    };
-
-    // Additional tests
-    const pickWordMatchesSize = () => {
-      const w = pickWord(6);
-      results.push({ name: "pickWord length matches grid size", passed: w.length === 6 });
-    };
-
-    const placeholderGridSafe = () => {
-      const total = 4 * 4;
-      const temp: Tile[] = Array.from({ length: total }, (_, i) => (i < 5 ? makePlaceholder(i) : { id: i + 1, char: "A", isTarget: false }));
-      const safe = temp.length === total && temp.every((t) => typeof t.char === "string");
-      results.push({ name: "placeholder tiles are valid", passed: safe });
-    };
-
-    const targetCountEqualsSize = () => {
-      const { board } = makeSolvedBoard(5, "easy", "APPLE");
-      const count = board.filter((t) => t.isTarget).length;
-      results.push({ name: "target tiles count equals grid size", passed: count === 5 });
-    };
-
-    const topRowStringLength = () => {
-      const { board } = makeSolvedBoard(4, "easy", "WORD");
-      const s = topRowString(board.slice(0, 10), 4); // even if truncated array
-      results.push({ name: "topRowString returns size-length string", passed: typeof s === "string" && s.length === 4 });
-    };
-
-    const evalGuessGreensWork = () => {
-      const { board, word } = makeSolvedBoard(4, "easy", "WORD");
-      // Path = click the top-row tiles left-to-right
-      const path = [0, 1, 2, 3];
-      const m = evaluateGuessFromPath(board, 4, word, path);
-      const greens = Object.values(m).filter((v) => v === "g").length;
-      results.push({ name: "evaluateGuessFromPath all green on exact match", passed: greens === 4 });
-    };
-
-    const evalGuessGreensEqualCorrectColumns = () => {
-      const { board, word } = makeSolvedBoard(4, "easy", "WORD");
-      // Swap first two columns (W<->O)
-      const t0 = 0; const t1 = 1; const tmp = board[t0]; board[t0] = board[t1]; board[t1] = tmp;
-      const path = [0, 1, 2, 3];
-      const m = evaluateGuessFromPath(board, 4, word, path);
-      const greens = Object.values(m).filter((v) => v === "g").length;
-      // R and D remain in their correct columns
-      results.push({ name: "greens equal number of clicked tiles already in correct columns", passed: greens === 2 });
-    };
-
-    const evalGuessRejectWrongLength = () => {
-      const { board, word } = makeSolvedBoard(4, "easy", "WORD");
-      const path = [0, 1, 2]; // wrong length
-      const m = evaluateGuessFromPath(board, 4, word, path);
-      results.push({ name: "evaluateGuessFromPath ignores wrong length", passed: Object.keys(m).length === 0 });
-    };
-
-    // NEW: Global evaluator tests
-    const globalGreensOnTopRow = () => {
-      const { board, word } = makeSolvedBoard(4, "easy", "WORD");
-      // board is solved; every top-row tile should be green for any non-empty guess containing those letters
-      const m = evaluateGuessGlobal(board, 4, word, "WORD");
-      const greens = Object.values(m).filter((v) => v === "g").length;
-      results.push({ name: "evaluateGuessGlobal greens on correct top row", passed: greens >= 4 });
-    };
-
-    const globalMarksAbsentAsGray = () => {
-      const { board, word } = makeSolvedBoard(4, "easy", "WORD");
-      const m = evaluateGuessGlobal(board, 4, word, "ZZZZ");
-      const hasGray = Object.values(m).some((v) => v === "x");
-      results.push({ name: "evaluateGuessGlobal marks absent letters gray", passed: hasGray });
-    };
-
-    const globalNoHintsOnEmptyGuess = () => {
-      const { board, word } = makeSolvedBoard(4, "easy", "WORD");
-      const m = evaluateGuessGlobal(board, 4, word, "");
-      results.push({ name: "evaluateGuessGlobal no hints on empty guess", passed: Object.keys(m).length === 0 });
-    };
-
-    const superNoInitialGreens = () => {
-      const { board, word } = makeSolvedBoard(5, "super", "LEVEL");
-      shuffleByRandomMoves(board, 5, 300);
-      ensureNoInitialTopRowGreens(board, 5, word);
-      const hasGreens = hasAnyTopRowGreen(board, 5, word);
-      results.push({ name: "SUPER start has no initial top-row greens", passed: hasGreens === false });
-    };
-
-    safeTopRowNoCrash();
-    solvedBoardIsFull();
-    shuffleKeepsChars();
-    manhattanNonNegative();
-    correctColumnLogic();
-    pickWordMatchesSize();
-    placeholderGridSafe();
-    targetCountEqualsSize();
-    topRowStringLength();
-    evalGuessGreensWork();
-    evalGuessGreensEqualCorrectColumns();
-
-    // After-eval upgrade: yellow should become green when moved into correct column
-    const yellowUpgradesToGreen = () => {
-      const { board, word } = makeSolvedBoard(4, "easy", "WORD");
-      // Swap W and O so W is in wrong column
-      const tmp = board[0]; board[0] = board[1]; board[1] = tmp;
-      const path = [0, 1, 2, 3];
-      const hints = evaluateGuessFromPath(board, 4, word, path);
-      const wTile = board[1]; // W is now at index 1
-      const effNow = superEffectiveHint(wTile, 1, 4, hints, word); // should be yellow
-      const effAsIfMoved = superEffectiveHint(wTile, 0, 4, hints, word); // would become green at col 0
-      results.push({ name: "yellow promotes to green when in correct column", passed: effNow === "y" && effAsIfMoved === "g" });
-    };
-    yellowUpgradesToGreen();
-    evalGuessRejectWrongLength();
-    globalGreensOnTopRow();
-    globalMarksAbsentAsGray();
-    globalNoHintsOnEmptyGuess();
-    superNoInitialGreens();
-
-    // canSlideInSuper tests
-    const gatingBeforeFullGuess = () => {
-      results.push({ name: "canSlideInSuper false before full guess", passed: canSlideInSuper(3, 4) === false });
-    };
-    const gatingAfterFullGuess = () => {
-      results.push({ name: "canSlideInSuper true at full guess", passed: canSlideInSuper(4, 4) === true });
-    };
-    gatingBeforeFullGuess();
-    gatingAfterFullGuess();
-
-    // Super input helpers tests
-    const guessAppendRespectsSize = () => {
-      const g1 = appendGuess("", "a", 4);
-      const g2 = appendGuess(g1, "b", 4);
-      const g3 = appendGuess(g2, "C", 4);
-      const g4 = appendGuess(g3, "-", 4); // ignored non-letter
-      const g5 = appendGuess(g4, "D", 4);
-      const g6 = appendGuess(g5, "E", 4); // capped at size
-      results.push({ name: "appendGuess uppercases and caps length", passed: g5 === "ABCD" && g6 === "ABCD" });
-    };
-    const guessBackspaceSafe = () => {
-      const g = backspaceGuess("");
-      results.push({ name: "backspaceGuess safe on empty", passed: g === "" });
-    };
-    guessAppendRespectsSize();
-    guessBackspaceSafe();
-
-    setTestResults(results);
-  };
-
-  const rootCardClasses = `w-full max-w-3xl mx-auto p-4 select-none rounded-2xl shadow-lg ${palette.pageBg} ${palette.pageText}`;
-  const btnBase = `border rounded px-3 py-1 ${palette.controlBg}`;
-  const selectBase = `border rounded px-2 py-1 ${palette.selectBg}`;
-  const tileBorder = `${palette.border}`;
+  const solvedCount = lockedRows.size;
+  const meterPct = Math.max(0, Math.min(100, Math.round((score / SCORE_CAP) * 100)));
+  const low = meterPct <= 20;
 
   return (
-    <div className={rootCardClasses} style={{ colorScheme: isDark ? "dark" : "light" }}>
-      <header className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Letter Slide</h1>
-          <p className="text-sm opacity-70">Arrange the top row to form the word.</p>
-        </div>
-        <div className="flex gap-2 items-center flex-wrap">
-          <select className={selectBase} value={size} onChange={(e) => setSize(parseInt(e.target.value))}>
-            {[3, 4, 5, 6].map((n) => (
-              <option key={n} value={n}>{n}×{n}</option>
-            ))}
-          </select>
-          <select className={selectBase} value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
-            <option value="easy">Easy (word shown)</option>
-            <option value="hard">Mystery (word hidden)</option>
-            <option value="super">Super Difficult (enter guesses)</option>
-          </select>
-          <select className={selectBase} value={theme} onChange={(e) => setTheme(e.target.value as Theme)} aria-label="Theme">
-            <option value="system">System</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
-          </select>
-          <button className={btnBase} onClick={() => startGame()}>New</button>
-        </div>
-      </header>
+    <div className={`${isDark ? "bg-slate-900 text-slate-100" : "bg-white text-neutral-900"} min-h-screen w-full overflow-x-hidden`}>
+      <div className="max-w-3xl mx-auto p-4 select-none">
+        {/* Intro overlay (first visit) */}
+        {showIntro && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className={`w-full max-w-lg rounded-2xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-neutral-200'} p-6`}>
+              <h2 className="text-2xl font-bold mb-1">How to play</h2>
+              <p className="opacity-80 mb-4">Swap <strong>any two tiles</strong> by clicking (select + select) or dragging one onto another. Solve all hidden words. Colors mean:</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5 text-center">
+                <LegendBox isDark={isDark} color={isDark?"bg-emerald-600":"bg-green-300"} icon="★" label="Correct cell" />
+                <LegendBox isDark={isDark} color={isDark?"bg-orange-600":"bg-orange-300"} icon="↔︎" label="Right row" />
+                <LegendBox isDark={isDark} color={isDark?"bg-amber-600":"bg-yellow-300"} icon="↕︎" label="Right column" />
+                <LegendBox isDark={isDark} color={isDark?"bg-slate-600":"bg-neutral-300"} icon="✕" label="Not in row/col" />
+              </div>
+              <div className="flex items-center justify-between text-sm mb-4">
+                <div className="opacity-80">Your meter drains over time and with moves. Make greens to refill. Finish all rows before it hits zero!</div>
+              </div>
+              <div className="text-right">
+                <button
+                  className={`px-4 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`}
+                  onClick={() => { setShowIntro(false); setSeconds(0); setScore(SCORE_START); setRunning(true); }}
+                >
+                  Ready to play
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
-      {/* Word display / hints */}
-      <div className="mb-3 flex items-center gap-3">
-        <div className="flex-1">
-          {mode === "easy" ? (
-            <div className="font-mono text-lg tracking-widest">Target: <span className="font-bold">{secret}</span></div>
-          ) : mode === "hard" ? (
-            <div className="font-mono text-lg tracking-widest">Target: <span className="opacity-50">????{" ".repeat(Math.max(0, size - 4))}</span> <span className="text-xs opacity-60">(mystery)</span></div>
-          ) : (
-            <div className="font-mono text-lg tracking-widest">Super mode: <span className="opacity-70">tap letters on the grid to enter a {size}-letter guess (sliding unlocks after your first full guess)</span></div>
-          )}
-          <div className="text-xs opacity-70">Lower bound (target Manhattan): {targetLowerBound}</div>
-        </div>
-        <div className="text-right">
-          <div className="text-sm">Moves: <span className="font-semibold">{moves}</span></div>
-          <div className="text-sm">Time: <span className="font-semibold">{Math.floor(secs / 60)}:{(secs % 60).toString().padStart(2, "0")}</span></div>
-        </div>
-      </div>
-
-      {/* Grid */}
-      <div
-        className="grid gap-2"
-        style={{ gridTemplateColumns: `repeat(${size}, minmax(0,1fr))` }}
-      >
-        {renderBoard.map((t, i) => {
-          const isBlank = t.id === 0;
-          // Visual feedback rules
-          let eff: Hint | undefined = undefined;
-          let base: string;
-          if (isBlank) {
-            base = palette.tileBlank;
-          } else if (mode === "hard") {
-            const correctCol = isCorrectColumn(t, i, size);
-            base = t.isTarget ? (correctCol ? palette.tileRight : palette.tileWrong) : palette.tileNeutral;
-          } else if (mode === "super") {
-            if (!hasGuessedOnce) {
-              base = palette.tileNeutral;
-            } else if (missLetters.has(t.char)) {
-              base = palette.guessMiss;
-            } else {
-              eff = superEffectiveHint(t, i, size, hints, secret);
-              base = eff === "g" ? palette.tileRight : eff === "y" ? palette.tileWrong : palette.tileNeutral;
-            }
-          } else {
-            // easy: just show targets in yellow so players know which letters matter
-            base = t.isTarget ? palette.tileWrong : palette.tileNeutral;
-          }
-
-          const classes = `aspect-square rounded-xl border ${tileBorder} flex items-center justify-center font-bold text-xl ${palette.tileText} ${base}`;
-
-          return (
-            <button
-              key={t.id + ":" + i}
-              className={classes}
-              onClick={() => onTileClick(i)}
-              aria-label={isBlank ? "blank" : t.char || ""}
-              disabled={board.length !== size * size}
+        {/* Header */}
+        <header className="flex items-center justify-between mb-2">
+          <h1 className="text-xl font-bold tracking-wide">Letter Slide</h1>
+          <div className="flex items-center gap-2">
+            <select
+              className={`px-2 py-1 rounded-md border ${isDark ? "bg-slate-800 border-slate-600" : "bg-white border-neutral-300"}`}
+              value={size}
+              onChange={(e) => startGame(parseInt(e.target.value, 10))}
             >
-              {isBlank ? "" : (
-                <span className={`font-mono ${spinning ? "animate-spin" : ""}`}>
-                  {spinning ? String.fromCharCode(65 + ((i + spinTick) % 26)) : t.char}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+              {[3, 4, 5, 6].map((n) => (
+                <option key={n} value={n}>{n}×{n}</option>
+              ))}
+            </select>
+            <button className={`px-3 py-1 rounded-md border ${isDark ? "bg-slate-800 border-slate-600 hover:bg-slate-700" : "bg-white border-neutral-300 hover:bg-neutral-50"}`} onClick={() => startGame(size)}>New</button>
+            <select
+              className={`px-2 py-1 rounded-md border ${isDark ? "bg-slate-800 border-slate-600" : "bg-white border-neutral-300"}`}
+              value={theme}
+              onChange={(e) => setTheme((e.target as HTMLSelectElement).value as Theme)}
+              title="Theme"
+            >
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </div>
+        </header>
 
-      {/* Controls */}
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        {mode === "easy" && (
-          <button className={btnBase} onClick={() => startGame(secret)}>Re-shuffle same word</button>
-        )}
-        {mode === "hard" && (
-          <>
-            <button className={btnBase} onClick={() => startGame()}>Re-shuffle mystery</button>
-            <button className={btnBase} onClick={() => alert(`Hint: the ${size}-letter word starts with ${secret[0]}`)}>Hint: first letter</button>
-          </>
-        )}
-        {mode === "super" && (
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Read-only guess field populated by tile clicks */}
-            <input
-              className={`${selectBase} font-mono`}
-              type="text"
-              value={guess}
-              readOnly
-              placeholder={`${size}-letter guess`}
-              aria-label="Guess (click tiles to enter)"
-              onKeyDown={(e) => {
-                if (e.key === "Backspace") { setGuess(backspaceGuess(guess)); setGuessPath(guessPath.slice(0, -1)); }
-                if (e.key === "Enter" && guess.length === size) { setHints(evaluateGuessGlobal(board, size, secret, guess)); setGuessPath([]); const gs = new Set(guess.toUpperCase()); const ss = new Set(secret); const not = Array.from(gs).filter((ch)=>!ss.has(ch)); setMissLetters((prev)=> new Set([...Array.from(prev), ...not])); }
-              }}
-              style={{ width: `${Math.max(6, size + 4)}ch` }}
+        {/* Subheader with meter */}
+        <div className="mb-3">
+          <div className="flex items-center justify-between text-sm mb-1">
+            <div className="font-mono">Time: {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")} · Moves: {moves}</div>
+            <div className="font-mono flex items-center gap-2">
+              <span>Solved {solvedCount}/{size}</span>
+              <span className="relative">
+                <span className={`px-2 py-0.5 rounded-md border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-neutral-300'} transition-transform ${scoreFlash && scoreFlash.v>0 ? 'scale-110' : ''}`}>Score {score}</span>
+                {scoreFlash && (
+                  <span key={scoreFlash.key} className={`absolute -top-5 right-0 text-xs font-bold ${scoreFlash.v>0? 'text-emerald-500':'text-rose-500'} animate-[fadeInUp_0.7s_ease-out_forwards]`}>{scoreFlash.v>0?'+':''}{scoreFlash.v}</span>
+                )}
+              </span>
+            </div>
+          </div>
+          <div className={`h-2 w-full rounded-full ${isDark? 'bg-slate-800':'bg-neutral-200'} overflow-hidden ${low ? 'ring-2 ring-rose-400 animate-pulse' : ''}`}>
+            <div
+              className={`h-full ${low ? 'bg-gradient-to-r from-rose-600 via-orange-500 to-amber-400 animate-pulse' : 'bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-300'}`}
+              style={{ width: `${meterPct}%`, transition: 'width 250ms linear' }}
             />
-            <button className={btnBase} onClick={() => setGuess(backspaceGuess(guess))} disabled={guess.length === 0} title="Backspace">⌫</button>
-            <button className={btnBase} onClick={() => { setGuess(""); setGuessPath([]); setHints({}); }} title="Clear guess">Clear</button>
+          </div>
+        </div>
+
+        {/* Legend + quick hint */}
+        <div className={`rounded-lg border ${isDark ? "bg-slate-800 border-slate-600" : "bg-slate-50 border"} p-3 text-sm mb-4`}>
+          <div className="mb-2">Swap any two tiles by clicking or dragging. Color key:</div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <LegendBox isDark={isDark} color={isDark?"bg-emerald-600":"bg-green-300"} icon="★" label="Correct cell" />
+            <LegendBox isDark={isDark} color={isDark?"bg-orange-600":"bg-orange-300"} icon="↔︎" label="Right row" />
+            <LegendBox isDark={isDark} color={isDark?"bg-amber-600":"bg-yellow-300"} icon="↕︎" label="Right column" />
+            <LegendBox isDark={isDark} color={isDark?"bg-slate-600":"bg-neutral-300"} icon="✕" label="Not in row/col" />
+          </div>
+        </div>
+
+        {/* Board */}
+        <div
+          ref={gridRef}
+          className={`grid gap-2 ${isDark ? "text-slate-100" : "text-neutral-900"}`}
+          style={{
+            gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))`,
+            touchAction: isTouch ? "none" : "auto",
+            overscrollBehavior: "contain",
+            maxWidth: "100%",
+          }}
+        >
+          {tilesToRender.map((t, i) => {
+            let base = isDark ? "bg-slate-700" : "bg-white";
+            const { r } = rc(i, size);
+            const locked = isRowLocked(r);
+
+            if (locked) base = isDark ? "bg-emerald-800" : "bg-green-200";
+            else {
+              const mark = marks.get(t.id);
+              base = mark === "g" ? (isDark ? "bg-emerald-600" : "bg-green-300")
+                   : mark === "o" ? (isDark ? "bg-orange-600" : "bg-orange-300")
+                   : mark === "y" ? (isDark ? "bg-amber-600" : "bg-yellow-300")
+                   : mark === "x" ? (isDark ? "bg-slate-600" : "bg-neutral-300")
+                   : base;
+            }
+
+            const isSel = selectedIndex === i;
+            const canSwap = !locked && selectedIndex != null && !isRowLocked(rc(selectedIndex, size).r) && i !== selectedIndex;
+            const celebrating = celebrateRow != null && r === celebrateRow;
+
+            // FLIP slide transform
+            const fl = flip.get(t.id);
+            const translate = fl ? `translate(${fl.dx}px, ${fl.dy}px)` : `translate(0px, 0px)`;
+            const styleTrans: CSSProperties = { transform: translate, transition: fl ? "transform 0s" : "transform 180ms ease" };
+
+            return (
+              <button
+                key={t.id}
+                ref={(el) => { if (el) tileRefs.current.set(t.id, el); }}
+                data-index={i}
+                draggable={!locked && !isTouch}
+                onDragStart={!isTouch ? (e) => {
+                  setDragIndex(i);
+                  try { e.dataTransfer.setData('text/plain', String(i)); } catch {}
+                  e.dataTransfer.effectAllowed = 'move';
+                } : undefined}
+                onDragOver={!isTouch ? (e) => { if (dragIndex != null && canSwapIndices(dragIndex, i)) e.preventDefault(); } : undefined}
+                onDrop={!isTouch ? (e) => {
+                  e.preventDefault();
+                  const a = dragIndex ?? parseInt(e.dataTransfer.getData('text/plain') || '-1', 10);
+                  const b = i;
+                  if (a >= 0 && a !== b && canSwapIndices(a, b)) performSwap(a, b);
+                  setDragIndex(null);
+                  setSelectedIndex(null);
+                } : undefined}
+                onDragEnd={!isTouch ? () => setDragIndex(null) : undefined}
+
+                onPointerDown={isTouch ? (e) => { (e.currentTarget as any).setPointerCapture?.(e.pointerId); setDragIndex(i); } : undefined}
+                onPointerUp={isTouch ? (e) => {
+                  const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+                  let ii: number | null = null; let n: HTMLElement | null = el;
+                  while (n && ii == null) { const v = n.getAttribute?.('data-index'); if (v != null) ii = parseInt(v, 10); n = n.parentElement as HTMLElement | null; }
+                  if (dragIndex != null && ii != null && ii !== dragIndex && canSwapIndices(dragIndex, ii)) performSwap(dragIndex, ii);
+                  setDragIndex(null); setSelectedIndex(null);
+                } : undefined}
+                onPointerCancel={isTouch ? () => setDragIndex(null) : undefined}
+
+                onClick={() => handleTileClick(i)}
+                style={styleTrans}
+                className={`relative aspect-square rounded-xl border ${isDark ? "border-slate-600" : "border-neutral-300"} ${base}
+                            flex items-center justify-center text-xl font-bold
+                            ${isSel ? "ring-2 ring-sky-500" : canSwap ? "ring-2 ring-sky-300" : ""}
+                            ${celebrating ? "animate-[bounce_0.6s_ease-out_1]" : ""}
+                            ${locked ? "cursor-not-allowed pointer-events-none opacity-95" : "cursor-pointer"}
+                            shadow-[0_4px_0_rgba(0,0,0,.18)]`}
+              >
+                <span className="pointer-events-none absolute inset-0 rounded-xl" style={{ background: isDark ? 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.0) 55%)' : 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.0) 60%)' }} />
+                {t.char}
+                {locked && <span className="absolute top-1 right-1 text-xs opacity-70">🔒</span>}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Dev tests (trimmed to core invariants) */}
+        <details className="mt-6 text-sm">
+          <summary className="cursor-pointer select-none">Run dev tests</summary>
+          <div className="mt-2 flex gap-2">
             <button
-              className={btnBase}
-              onClick={() => { setHints(evaluateGuessGlobal(board, size, secret, guess)); setGuessPath([]); const gs = new Set(guess.toUpperCase()); const ss = new Set(secret); const not = Array.from(gs).filter((ch)=>!ss.has(ch)); setMissLetters((prev)=> new Set([...Array.from(prev), ...not])); }}
-              disabled={guess.length !== size}
+              className={`px-3 py-1 rounded-md border ${isDark ? "bg-slate-800 border-slate-600 hover:bg-slate-700" : "bg-white border-neutral-300 hover:bg-neutral-50"}`}
+              onClick={() => {
+                const results: { name: string; passed: boolean }[] = [];
+
+                // campaign words exist in dictionary
+                const camp = makeCampaignBoard(4);
+                const allInDict = camp.words.every((w) => (WORDS[4] || []).includes(w));
+                results.push({ name: "campaign words exist in dictionary", passed: allInDict });
+
+                // board letters equal words letters (multiset)
+                const boardCounts: Record<string, number> = {};
+                camp.board.forEach((t) => { boardCounts[t.char] = (boardCounts[t.char] || 0) + 1; });
+                const wordCounts: Record<string, number> = {};
+                camp.words.join("").split("").forEach((ch) => { wordCounts[ch] = (wordCounts[ch] || 0) + 1; });
+                const sameMultiset = Object.keys({ ...boardCounts, ...wordCounts }).every((k) => boardCounts[k] === wordCounts[k]);
+                results.push({ name: "board letters equal words letters", passed: sameMultiset });
+
+                // computeMarks basics - orange for row-misplaced
+                {
+                  const sizeT = 4; const secrets = [{word:"ABCD"},{word:"EFGH"},{word:"IJKL"},{word:"MNOP"}];
+                  const boardT: Tile[] = [];
+                  for (let r=0;r<sizeT;r++) for (let c=0;c<sizeT;c++) boardT.push({id:r*sizeT+c+1,char:secrets[r].word[c]});
+                  // swap to create row misplacement in row 0
+                  swapArr(boardT, idx(0,0,sizeT), idx(0,1,sizeT)); // row 0 now B A C D
+                  const m = computeMarks(boardT, sizeT, secrets, new Set());
+                  const idA = boardT[idx(0,1,sizeT)].id; // 'A' in row 0 wrong col -> orange
+                  results.push({ name: "orange for row-misplaced letter", passed: m.get(idA)==='o' });
+                }
+
+                // computeMarks basics - yellow for column-misplaced
+                {
+                  const sizeT = 4; const secrets = [{word:"ABCD"},{word:"EFGH"},{word:"IJKL"},{word:"MNOP"}];
+                  const boardT: Tile[] = [];
+                  for (let r=0;r<sizeT;r++) for (let c=0;c<sizeT;c++) boardT.push({id:r*sizeT+c+1,char:secrets[r].word[c]});
+                  // move 'A' from (0,0) to (1,0) by swapping with 'E'
+                  swapArr(boardT, idx(0,0,sizeT), idx(1,0,sizeT)); // column 0 has A in wrong row
+                  const m2 = computeMarks(boardT, sizeT, secrets, new Set());
+                  const idA2 = boardT[idx(1,0,sizeT)].id; // 'A' in right column wrong row -> yellow
+                  results.push({ name: "yellow for column-misplaced letter", passed: m2.get(idA2)==='y' });
+                }
+
+                // newlyGreenIDs utility test
+                {
+                  const sizeT = 3; const secrets = [{word:"ABC"},{word:"DEF"},{word:"GHI"}];
+                  const boardT: Tile[] = [];
+                  for (let r=0;r<sizeT;r++) for (let c=0;c<sizeT;c++) boardT.push({id:r*sizeT+c+1,char:secrets[r].word[c]});
+                  const cur = computeMarks(boardT, sizeT, secrets, new Set()); // all green
+                  const prev = new Map<number, Hint>();
+                  const gained = newlyGreenIDs(prev, cur, new Set());
+                  results.push({ name: "newlyGreenIDs finds all at start", passed: gained.length === 9 });
+                }
+
+                alert(results.map((r) => `${r.passed ? "✅" : "❌"} ${r.name}`).join("\n"));
+              }}
             >
-              Submit
+              Run
             </button>
           </div>
+        </details>
+
+        {/* Win overlay */}
+        {won && !hideWin && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className={`w-full max-w-sm rounded-2xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-neutral-200'} p-5 text-center`}>
+              <h2 className="text-2xl font-bold mb-2">🎉 You solved all words!</h2>
+              <p className="mb-4 text-sm opacity-90">Great job on a {size}×{size} board.</p>
+              <div className="grid grid-cols-3 gap-2 mb-4 text-sm">
+                <div className={`rounded-lg ${isDark ? 'bg-slate-800' : 'bg-neutral-100'} p-3`}>
+                  <div className="opacity-70">Moves</div>
+                  <div className="font-mono text-lg">{moves}</div>
+                </div>
+                <div className={`rounded-lg ${isDark ? 'bg-slate-800' : 'bg-neutral-100'} p-3`}>
+                  <div className="opacity-70">Time</div>
+                  <div className="font-mono text-lg">{Math.floor(seconds/60)}:{String(seconds%60).padStart(2,'0')}</div>
+                </div>
+                <div className={`rounded-lg ${isDark ? 'bg-slate-800' : 'bg-neutral-100'} p-3`}>
+                  <div className="opacity-70">Score</div>
+                  <div className="font-mono text-lg">{score}</div>
+                </div>
+              </div>
+              <div className="flex gap-2 justify-center">
+                <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => startGame(size)}>Play again</button>
+                <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => {
+                  const url = typeof window !== 'undefined' ? window.location.href : '';
+                  const text = `I solved a ${size}×${size} Letter Slide in ${moves} moves and ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}! Score ${score}.`;
+                  const share = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
+                  window.open(share, '_blank');
+                }}>Share</button>
+                <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => setHideWin(true)}>Close</button>
+              </div>
+            </div>
+          </div>
         )}
-        <button className={btnBase} onClick={() => setRunning((r) => !r)}>{running && !won ? "Pause" : "Start"}</button>
-        <button className={btnBase} onClick={() => startGame()}>Reset</button>
-        {/* Dev tests */}
-        <button className={`${btnBase} ml-auto`} onClick={runTests}>Run tests</button>
+
+        {/* Loss overlay */}
+        {lost && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className={`w-full max-w-sm rounded-2xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-neutral-200'} p-5 text-center`}>
+              <h2 className="text-2xl font-bold mb-2">⏳ Out of time</h2>
+              <p className="mb-4 text-sm opacity-90">Your meter hit zero. Try a more efficient path!</p>
+              <div className="grid grid-cols-3 gap-2 mb-4 text-sm">
+                <div className={`rounded-lg ${isDark ? 'bg-slate-800' : 'bg-neutral-100'} p-3`}>
+                  <div className="opacity-70">Moves</div>
+                  <div className="font-mono text-lg">{moves}</div>
+                </div>
+                <div className={`rounded-lg ${isDark ? 'bg-slate-800' : 'bg-neutral-100'} p-3`}>
+                  <div className="opacity-70">Time</div>
+                  <div className="font-mono text-lg">{Math.floor(seconds/60)}:{String(seconds%60).padStart(2,'0')}</div>
+                </div>
+                <div className={`rounded-lg ${isDark ? 'bg-slate-800' : 'bg-neutral-100'} p-3`}>
+                  <div className="opacity-70">Score</div>
+                  <div className="font-mono text-lg">{score}</div>
+                </div>
+              </div>
+              <div className="flex gap-2 justify-center">
+                <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => startGame(size)}>Try again</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-
-      {/* Test results panel */}
-      {testResults && (
-        <div className={`mt-4 p-3 rounded-2xl border ${palette.panelBg}`}>
-          <div className="font-semibold mb-2">Dev tests</div>
-          <ul className="text-sm list-disc pl-5">
-            {testResults.map((t) => (
-              <li key={t.name} className={t.passed ? "text-green-600" : "text-red-600"}>
-                {t.passed ? "✅" : "❌"} {t.name}
-                {t.details ? <span className="opacity-70"> - {t.details}</span> : null}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <footer className="mt-6 text-xs opacity-60">
-        <p>
-          Rules: Slide tiles into the blank to arrange the <strong>top row</strong>.
-          <em>Easy</em>: goal word shown. <em>Mystery</em>: target tiles highlighted (yellow), turn green when in the correct column.
-          <em> Super</em>: <strong>tap letters on the grid</strong> to build a {size}-letter guess; tiles turn green if a tile sits in its correct top-row column of the secret word, yellow if the letter is in the word, and gray if the letter is not in the word (stays gray). Sliding is disabled until you enter your first full guess; Clear the guess to enter a new one and re-lock sliding.
-        </p>
-      </footer>
-
-      {/* Intro overlay (Super mode) */}
-      {mode === "super" && showIntro && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className={`max-w-md w-full rounded-2xl border ${palette.panelBg} ${palette.pageText} p-4 text-sm`}>
-            <h2 className="text-lg font-semibold mb-2">Super Difficult</h2>
-            <ul className="list-disc pl-5 space-y-1">
-              <li>Figure out the hidden word.</li>
-              <li>Solve by moving letters into the <span className="font-semibold">top row</span>.</li>
-              <li>Tap letters to guess. <span className="font-semibold">Green</span> = correct top-row column, <span className="font-semibold">Yellow</span> = in the word, <span className="font-semibold">Gray</span> = not in the word (stays gray).</li>
-            </ul>
-            <div className="mt-4 text-right">
-              <button className={btnBase} onClick={() => { setShowIntro(false); setSpinning(true); }}>Ready to play</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Win overlay */}
-      {won && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className={`max-w-sm w-full rounded-2xl border ${palette.winBg} p-4`}>
-            <h2 className="text-lg font-semibold mb-2">You solved it!</h2>
-            <p className="text-sm mb-3">Word: <span className="font-mono font-bold">{secret}</span><br/>Moves: {moves} · Time: {Math.floor(secs / 60)}:{(secs % 60).toString().padStart(2, "0")}</p>
-            <div className="text-right">
-              <button className={btnBase} onClick={() => startGame()}>Play again</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
+
+// --------- Small legend box component (declared after default export, fine in TS/JS)
+function LegendBox({ isDark, color, icon, label }: { isDark: boolean; color: string; icon: string; label: string }) {
+  return (
+    <div className={`flex items-center gap-2 p-2 rounded-lg border ${isDark ? 'border-slate-600 bg-slate-800/50' : 'border-neutral-300 bg-white/70'}`}>
+      <div className={`w-7 h-7 rounded-md flex items-center justify-center text-base font-bold ${color} shadow-inner`}>{icon}</div>
+      <div className="text-xs font-medium">{label}</div>
+    </div>
+  );
+}
+
+// Tailwind keyframes for score flash
+// (Using arbitrary class animate-[fadeInUp...] in JSX; ensure safelisted or use JIT)
+// keyframes are not required here because Tailwind JIT will inline them for the shorthand used above.
