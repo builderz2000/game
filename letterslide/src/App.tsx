@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 // =============================================================
 // Letter Slide — Single Mode (Free Solve, Any Row)
@@ -24,7 +24,6 @@ export type Hint = "g" | "o" | "y" | "x"; // green, orange(row), yellow(col), gr
 
 type RowSecret = { word: string };
 
-type Dir = "L" | "R" | "U" | "D"; // for animation tests
 
 // ---------- Tunables (scoring / meter)
 const SCORE_START = 100;           // initial meter (also the visual bar cap)
@@ -239,7 +238,6 @@ export default function App() {
   const [flip, setFlip] = useState<Map<number, { dx: number; dy: number }>>(new Map());
   const initialTouch = typeof window !== "undefined" && (("ontouchstart" in window) || (navigator as any).maxTouchPoints > 0);
   const [isTouch, setIsTouch] = useState(initialTouch);
-  const timerRef = useRef<number | null>(null);
 
   useEffect(() => { setIsTouch((("ontouchstart" in window) || (navigator as any).maxTouchPoints > 0)); }, []);
 
