@@ -24,11 +24,10 @@ export type Hint = "g" | "o" | "y" | "x"; // green, orange(row), yellow(col), gr
 
 type RowSecret = { word: string };
 
-
 // ---------- Tunables (scoring / meter)
 const SCORE_START = 100;           // initial meter (also the visual bar cap)
 const SCORE_CAP = 100;             // max shown in the bar (we clamp for clarity)
-const DECAY_PER_SEC = 1.5;           // continuous decay per second
+const DECAY_PER_SEC = 1.5;         // continuous decay per second
 const MOVE_PENALTY = 2;            // cost per swap
 const GREEN_BONUS = 5;             // reward when a tile becomes green for the first time
 const ROW_SOLVED_BONUS_PER_SIZE = 5; // per-size bonus when a row locks (5 * size)
@@ -70,11 +69,32 @@ function pickWord(size: number, preferred?: string) {
 
 // Campaign words and board
 function chooseCampaignWords(size: number, preferredFirst?: string): string[] {
-  const first = pickWord(size, preferredFirst);
-  const pool = WORDS[size] ?? [first];
-  const words: string[] = [first];
-  while (words.length < size) words.push(pool[rand(pool.length)]);
-  return words;
+  // pick UNIQUE words for each row
+  const poolAll = Array.from(new Set(WORDS[size] ?? []));
+  const words: string[] = [];
+
+  // optional preferred first word (validated to size by pickWord)
+  if (preferredFirst) {
+    const first = pickWord(size, preferredFirst);
+    if (!words.includes(first)) words.push(first);
+    const idxIn = poolAll.indexOf(first);
+    if (idxIn >= 0) poolAll.splice(idxIn, 1);
+  }
+  // shuffle pool and take without replacement
+  for (let i = poolAll.length - 1; i > 0; i--) {
+    const j = rand(i + 1); const t = poolAll[i]; poolAll[i] = poolAll[j]; poolAll[j] = t;
+  }
+  while (words.length < size && poolAll.length) words.push(poolAll.pop()!);
+
+  // Fallback safety (should not happen with provided lists)
+  const fallback = WORDS[size] ?? [];
+  let guard = 0;
+  while (words.length < size && guard < 1000) {
+    const w = fallback[rand(fallback.length)] || pickWord(size);
+    if (!words.includes(w)) words.push(w);
+    guard++;
+  }
+  return words.slice(0, size);
 }
 
 function makeCampaignBoard(size: number, maybeWord?: string): { words: string[]; board: Tile[] } {
@@ -84,7 +104,15 @@ function makeCampaignBoard(size: number, maybeWord?: string): { words: string[];
     const w = words[r];
     for (let c = 0; c < size; c++) board.push({ id: r * size + c + 1, char: w[c] });
   }
-  shuffleByAdjSwaps(board, size, Math.max(300, size * size * 10));
+  // Shuffle and GUARANTEE no row starts solved
+  const baseSteps = Math.max(300, size * size * 10);
+  shuffleByAdjSwaps(board, size, baseSteps);
+  let tries = 0;
+  const isAnyRowSolved = () => words.some((w, r) => rowString(board, size, r) === w);
+  while (isAnyRowSolved() && tries < 50) {
+    shuffleByAdjSwaps(board, size, size * size); // extra mixing
+    tries++;
+  }
   return { words, board };
 }
 
@@ -208,13 +236,19 @@ function usePrefersDark(): boolean {
 // App (single mode — free solve)
 // ======================================================
 export default function App() {
+  // Inject a couple of small keyframes to avoid Tailwind arbitrary animate classes
+  const GLOBAL_CSS = `
+    @keyframes fadeInUp { 0% { opacity: 0; transform: translateY(6px); } 100% { opacity: 1; transform: translateY(0); } }
+    @keyframes bounceOnce { 0%,100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
+  `;
+
   // Core state
   const [size, setSize] = useState(5);
 
   // Campaign-first init
   const campInit = useMemo(() => makeCampaignBoard(5), []);
-  const [board, setBoard] = useState<Tile[]>((() => campInit.board));
-  const [rowSecrets, setRowSecrets] = useState<RowSecret[]>((() => campInit.words.map((w) => ({ word: w }))));
+  const [board, setBoard] = useState<Tile[]>(() => campInit.board);
+  const [rowSecrets, setRowSecrets] = useState<RowSecret[]>(() => campInit.words.map((w) => ({ word: w })));
 
   // Rows solved can be in ANY order
   const [lockedRows, setLockedRows] = useState<Set<number>>(new Set());
@@ -245,6 +279,9 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>("system");
   const isDark = theme === "dark" || (theme === "system" && !isTouch && prefersDark);
 
+  // Set document title to game name
+  useEffect(() => { try { document.title = "WORDGAMI"; } catch {} }, []);
+
   useEffect(() => { if (!showIntro) try { localStorage.setItem("ls_intro_v1", "1"); } catch {} }, [showIntro]);
 
   // ===== Scoring / Meter =====
@@ -263,11 +300,7 @@ export default function App() {
     if (!running || won || lost) return;
     const id = window.setInterval(() => {
       setSeconds((s) => s + 1);
-      setScore((sc) => {
-        const next = Math.max(0, sc - DECAY_PER_SEC);
-        if (next !== sc) flash(-DECAY_PER_SEC);
-        return next;
-      });
+      setScore((sc) => Math.max(0, sc - DECAY_PER_SEC));
     }, 1000);
     return () => window.clearInterval(id);
   }, [running, won, lost]);
@@ -432,6 +465,8 @@ export default function App() {
 
   return (
     <div className={`${isDark ? "bg-slate-900 text-slate-100" : "bg-white text-neutral-900"} min-h-screen w-full overflow-x-hidden`}>
+      {/* Lightweight keyframes for score pop and row bounce */}
+      <style>{GLOBAL_CSS}</style>
       <div className="max-w-3xl mx-auto p-4 select-none">
         {/* Intro overlay (first visit) */}
         {showIntro && (
@@ -447,8 +482,9 @@ export default function App() {
               </div>
               <div className="flex items-center justify-between text-sm mb-4">
                 <div className="opacity-80">Your meter drains over time and with moves. Make greens to refill. Finish all rows before it hits zero!</div>
-              </div>
-              <div className="text-right">
+<p className="mt-2 text-xs sm:text-sm opacity-80">Swap any two tiles by clicking or dragging. Color key:</p>
+</div>
+<div className="text-right">
                 <button
                   className={`px-4 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`}
                   onClick={() => { setShowIntro(false); startGame(3); }}
@@ -462,7 +498,10 @@ export default function App() {
 
         {/* Header */}
         <header className="flex items-center justify-between mb-2">
-          <h1 className="text-xl font-bold tracking-wide">Letter Slide</h1>
+          <div className="flex items-center gap-3">
+            <LogoMark isDark={isDark} />
+            
+          </div>
           <div className="flex items-center gap-2">
             <select
               className={`px-2 py-1 rounded-md border ${isDark ? "bg-slate-800 border-slate-600" : "bg-white border-neutral-300"}`}
@@ -494,9 +533,15 @@ export default function App() {
             <div className="font-mono flex items-center gap-2">
               <span>Solved {solvedCount}/{size}</span>
               <span className="relative">
-                <span className={`px-2 py-0.5 rounded-md border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-neutral-300'} transition-transform ${scoreFlash && scoreFlash.v>0 ? 'scale-110' : ''}`}>Score {score}</span>
+                <span className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-neutral-300'} px-2 py-0.5 rounded-md border transition-transform ${scoreFlash && scoreFlash.v>0 ? 'scale-110' : ''}` }>Points {score}</span>
                 {scoreFlash && (
-                  <span key={scoreFlash.key} className={`absolute -top-5 right-0 text-xs font-bold ${scoreFlash.v>0? 'text-emerald-500':'text-rose-500'} animate-[fadeInUp_0.7s_ease-out_forwards]`}>{scoreFlash.v>0?'+':''}{scoreFlash.v}</span>
+                  <span
+                    key={scoreFlash.key}
+                    className={`absolute -top-5 right-0 text-xs font-bold ${scoreFlash.v>0? 'text-emerald-500':'text-rose-500'}`}
+                    style={{ animation: 'fadeInUp 0.7s ease-out forwards' }}
+                  >
+                    {scoreFlash.v>0?'+':''}{scoreFlash.v}
+                  </span>
                 )}
               </span>
             </div>
@@ -511,8 +556,7 @@ export default function App() {
 
         {/* Legend + quick hint */}
         <div className={`rounded-lg border ${isDark ? "bg-slate-800 border-slate-600" : "bg-slate-50 border"} p-3 text-sm mb-4`}>
-          <div className="mb-2">Swap any two tiles by clicking or dragging. Color key:</div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-4 gap-2">
             <LegendBox isDark={isDark} color={isDark?"bg-emerald-600":"bg-green-300"} icon="★" label="Correct cell" />
             <LegendBox isDark={isDark} color={isDark?"bg-orange-600":"bg-orange-300"} icon="↔︎" label="Right row" />
             <LegendBox isDark={isDark} color={isDark?"bg-amber-600":"bg-yellow-300"} icon="↕︎" label="Right column" />
@@ -554,6 +598,7 @@ export default function App() {
             const fl = flip.get(t.id);
             const translate = fl ? `translate(${fl.dx}px, ${fl.dy}px)` : `translate(0px, 0px)`;
             const styleTrans: CSSProperties = { transform: translate, transition: fl ? "transform 0s" : "transform 180ms ease" };
+            const styleAnim: CSSProperties = celebrating ? { animation: 'bounceOnce 0.6s ease-out 1' } : {};
 
             return (
               <button
@@ -588,11 +633,10 @@ export default function App() {
                 onPointerCancel={isTouch ? () => setDragIndex(null) : undefined}
 
                 onClick={() => handleTileClick(i)}
-                style={styleTrans}
+                style={{ ...styleTrans, ...styleAnim }}
                 className={`relative aspect-square rounded-xl border ${isDark ? "border-slate-600" : "border-neutral-300"} ${base}
                             flex items-center justify-center text-xl font-bold
                             ${isSel ? "ring-2 ring-sky-500" : canSwap ? "ring-2 ring-sky-300" : ""}
-                            ${celebrating ? "animate-[bounce_0.6s_ease-out_1]" : ""}
                             ${locked ? "cursor-not-allowed pointer-events-none opacity-95" : "cursor-pointer"}
                             shadow-[0_4px_0_rgba(0,0,0,.18)]`}
               >
@@ -685,7 +729,7 @@ export default function App() {
                   <div className="font-mono text-lg">{Math.floor(seconds/60)}:{String(seconds%60).padStart(2,'0')}</div>
                 </div>
                 <div className={`rounded-lg ${isDark ? 'bg-slate-800' : 'bg-neutral-100'} p-3`}>
-                  <div className="opacity-70">Score</div>
+                  <div className="opacity-70">Points</div>
                   <div className="font-mono text-lg">{score}</div>
                 </div>
               </div>
@@ -698,7 +742,7 @@ export default function App() {
                 <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => startGame(size)}>Play again</button>
                 <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => {
                   const url = typeof window !== 'undefined' ? window.location.href : '';
-                  const text = `I solved a ${size}×${size} Letter Slide in ${moves} moves and ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}! Score ${score}.`;
+                  const text = `I solved a ${size}×${size} WORDGAMI in ${moves} moves and ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}! Points ${score}.`;
                   const share = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
                   window.open(share, '_blank');
                 }}>Share</button>
@@ -724,7 +768,7 @@ export default function App() {
                   <div className="font-mono text-lg">{Math.floor(seconds/60)}:{String(seconds%60).padStart(2,'0')}</div>
                 </div>
                 <div className={`rounded-lg ${isDark ? 'bg-slate-800' : 'bg-neutral-100'} p-3`}>
-                  <div className="opacity-70">Score</div>
+                  <div className="opacity-70">Points</div>
                   <div className="font-mono text-lg">{score}</div>
                 </div>
               </div>
@@ -743,12 +787,33 @@ export default function App() {
 function LegendBox({ isDark, color, icon, label }: { isDark: boolean; color: string; icon: string; label: string }) {
   return (
     <div className={`flex items-center gap-2 p-2 rounded-lg border ${isDark ? 'border-slate-600 bg-slate-800/50' : 'border-neutral-300 bg-white/70'}`}>
-      <div className={`w-7 h-7 rounded-md flex items-center justify-center text-base font-bold ${color} shadow-inner`}>{icon}</div>
+      <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-xl sm:text-2xl font-bold ${color} shadow-inner`}>{icon}</div>
       <div className="text-xs font-medium">{label}</div>
     </div>
   );
 }
 
-// Tailwind keyframes for score flash
-// (Using arbitrary class animate-[fadeInUp...] in JSX; ensure safelisted or use JIT)
-// keyframes are not required here because Tailwind JIT will inline them for the shorthand used above.
+// --- Logo composed of 4×2 mini-tiles: top WORD (green letters), bottom GAMI (G/A/M green, I orange)
+function LogoMark({ isDark }: { isDark: boolean }) {
+  // Always render logo tiles like LIGHT theme game tiles on white bg
+  // (colored tile backgrounds, dark letters, light glossy overlay)
+  const tiles: { ch: string; tone: 'g' | 'o' }[] = [
+    { ch: 'W', tone: 'g' }, { ch: 'O', tone: 'g' }, { ch: 'R', tone: 'g' }, { ch: 'D', tone: 'g' },
+    { ch: 'G', tone: 'g' }, { ch: 'A', tone: 'g' }, { ch: 'M', tone: 'g' }, { ch: 'I', tone: 'o' },
+  ];
+  const tileBorder = 'border border-neutral-300';
+  const tileShadow = 'shadow-[0_3px_0_rgba(0,0,0,.15)]';
+  const tileGreen = 'bg-green-300';
+  const tileOrange = 'bg-orange-300';
+  const textColor = 'text-neutral-900';
+  return (
+    <div className="inline-grid grid-cols-4 gap-1" role="img" aria-label="WORD (green) / GAMI (I orange) logo tiles">
+      {tiles.map((t, i) => (
+        <div key={i} className={`relative w-8 h-8 sm:w-9 sm:h-9 rounded-lg ${t.tone==='g'?tileGreen:tileOrange} ${tileBorder} ${tileShadow} flex items-center justify-center font-black text-base sm:text-lg leading-none`}>
+          <span className="pointer-events-none absolute inset-0 rounded-lg" style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.0) 60%)' }} />
+          <span className={textColor}>{t.ch}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
