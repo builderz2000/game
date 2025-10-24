@@ -499,7 +499,7 @@ export default function App() {
         {/* Header */}
         <header className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-3">
-            <LogoMark isDark={isDark} />
+            <LogoMark />
             
           </div>
           <div className="flex items-center gap-2">
@@ -794,7 +794,7 @@ function LegendBox({ isDark, color, icon, label }: { isDark: boolean; color: str
 }
 
 // --- Logo composed of 4×2 mini-tiles: top WORD (green letters), bottom GAMI (G/A/M green, I orange)
-function LogoMark({ isDark }: { isDark: boolean }) {
+function LogoMark() {
   // Always render logo tiles like LIGHT theme game tiles on white bg
   // (colored tile backgrounds, dark letters, light glossy overlay)
   const tiles: { ch: string; tone: 'g' | 'o' }[] = [
