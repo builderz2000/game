@@ -28,7 +28,7 @@ type RowSecret = { word: string };
 // ---------- Tunables (scoring / meter)
 const SCORE_START = 100;           // initial meter (also the visual bar cap)
 const SCORE_CAP = 100;             // max shown in the bar (we clamp for clarity)
-const DECAY_PER_SEC = 2;           // continuous decay per second
+const DECAY_PER_SEC = 1.5;           // continuous decay per second
 const MOVE_PENALTY = 2;            // cost per swap
 const GREEN_BONUS = 5;             // reward when a tile becomes green for the first time
 const ROW_SOLVED_BONUS_PER_SIZE = 5; // per-size bonus when a row locks (5 * size)
