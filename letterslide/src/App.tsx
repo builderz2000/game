@@ -427,6 +427,8 @@ export default function App() {
   const solvedCount = lockedRows.size;
   const meterPct = Math.max(0, Math.min(100, Math.round((score / SCORE_CAP) * 100)));
   const low = meterPct <= 20;
+  const nextSize = Math.min(size + 1, 6);
+  const canNext = size < 6;
 
   return (
     <div className={`${isDark ? "bg-slate-900 text-slate-100" : "bg-white text-neutral-900"} min-h-screen w-full overflow-x-hidden`}>
@@ -449,7 +451,7 @@ export default function App() {
               <div className="text-right">
                 <button
                   className={`px-4 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`}
-                  onClick={() => { setShowIntro(false); setSeconds(0); setScore(SCORE_START); setRunning(true); }}
+                  onClick={() => { setShowIntro(false); startGame(3); }}
                 >
                   Ready to play
                 </button>
@@ -688,6 +690,11 @@ export default function App() {
                 </div>
               </div>
               <div className="flex gap-2 justify-center">
+                {canNext && (
+                  <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => startGame(nextSize)}>
+                    Next level {nextSize}×{nextSize}
+                  </button>
+                )}
                 <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => startGame(size)}>Play again</button>
                 <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => {
                   const url = typeof window !== 'undefined' ? window.location.href : '';
