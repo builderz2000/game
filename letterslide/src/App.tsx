@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 // =============================================================
-// Letter Slide — Single Mode (Free Solve, Any Row)
+// WORDGAMI — Single Mode (Free Solve, Any Row)
 // - Board has N rows; each row r has a hidden real word of length N
 // - The multiset of all letters on the board equals the letters of all row words
 // - Swap ANY two tiles (click-select twice, or drag one onto another)
@@ -13,11 +13,10 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 //   Priority: green > orange > yellow > gray. Duplicates are handled by counts.
 // - Rows can be solved in ANY order; a solved row locks (cannot move its tiles)
 // - Win when all rows are solved OR you run out of meter (0 = out of time)
-// - Mobile friendly: drag-to-swap, FLIP animation, light/dark theme
+// - Mobile friendly: drag-to-swap, FLIP animation, light-only theme (per UX request)
 // =============================================================
 
 // ---------- Types
-export type Theme = "system" | "light" | "dark";
 
 type Tile = { id: number; char: string };
 export type Hint = "g" | "o" | "y" | "x"; // green, orange(row), yellow(col), gray
@@ -213,24 +212,8 @@ function newlyGreenIDs(prev: Map<number, Hint>, next: Map<number, Hint>, already
   return gained;
 }
 
-// ---------- Dark mode (system-aware)
-function usePrefersDark(): boolean {
-  const [prefersDark, setPrefersDark] = useState(false);
-  useEffect(() => {
-    const m = window.matchMedia("(prefers-color-scheme: dark)");
-    const on = () => setPrefersDark(!!m.matches);
-    on();
-    if (typeof m.addEventListener === "function") {
-      m.addEventListener("change", on);
-      return () => m.removeEventListener("change", on);
-    } else if (typeof (m as any).addListener === "function") {
-      (m as any).addListener(on);
-      return () => (m as any).removeListener(on);
-    }
-    return () => {};
-  }, []);
-  return prefersDark;
-}
+// ---------- Light-only UI (isDark forced false per prior request)
+
 
 // ======================================================
 // App (single mode — free solve)
@@ -275,9 +258,7 @@ export default function App() {
 
   useEffect(() => { setIsTouch((("ontouchstart" in window) || (navigator as any).maxTouchPoints > 0)); }, []);
 
-  const prefersDark = usePrefersDark();
-  const [theme, setTheme] = useState<Theme>("system");
-  const isDark = theme === "dark" || (theme === "system" && !isTouch && prefersDark);
+  const isDark = false; // force light mode; hide theme switch
 
   // Set document title to game name
   useEffect(() => { try { document.title = "WORDGAMI"; } catch {} }, []);
@@ -462,6 +443,7 @@ export default function App() {
   const low = meterPct <= 20;
   const nextSize = Math.min(size + 1, 6);
   const canNext = size < 6;
+  const displayScore = Math.max(0, Math.round(score));
 
   return (
     <div className={`${isDark ? "bg-slate-900 text-slate-100" : "bg-white text-neutral-900"} min-h-screen w-full overflow-x-hidden`}>
@@ -472,19 +454,19 @@ export default function App() {
         {showIntro && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
             <div className={`w-full max-w-lg rounded-2xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-neutral-200'} p-6`}>
-              <h2 className="text-2xl font-bold mb-1">How to play</h2>
+              <div className="flex justify-center mb-3"><LogoMark /></div>
+<h2 className="text-2xl font-bold mb-1">How to play</h2>
               <p className="opacity-80 mb-4">Swap <strong>any two tiles</strong> by clicking (select + select) or dragging one onto another. Solve all hidden words. Colors mean:</p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5 text-center">
-                <LegendBox isDark={isDark} color={isDark?"bg-emerald-600":"bg-green-300"} icon="★" label="Correct cell" />
-                <LegendBox isDark={isDark} color={isDark?"bg-orange-600":"bg-orange-300"} icon="↔︎" label="Right row" />
-                <LegendBox isDark={isDark} color={isDark?"bg-amber-600":"bg-yellow-300"} icon="↕︎" label="Right column" />
-                <LegendBox isDark={isDark} color={isDark?"bg-slate-600":"bg-neutral-300"} icon="✕" label="Not in row/col" />
+                <LegendBox color="bg-green-300" icon="★" label="Correct cell" />
+                <LegendBox color="bg-orange-300" iconNode={<ArrowIcon dir="h" />} label="Right row" />
+                <LegendBox color="bg-yellow-300" iconNode={<ArrowIcon dir="v" />} label="Right column" />
+                <LegendBox color="bg-neutral-300" icon="✕" label="Not in row/col" />
               </div>
               <div className="flex items-center justify-between text-sm mb-4">
                 <div className="opacity-80">Your meter drains over time and with moves. Make greens to refill. Finish all rows before it hits zero!</div>
-<p className="mt-2 text-xs sm:text-sm opacity-80">Swap any two tiles by clicking or dragging. Color key:</p>
-</div>
-<div className="text-right">
+              </div>
+              <div className="text-right">
                 <button
                   className={`px-4 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`}
                   onClick={() => { setShowIntro(false); startGame(3); }}
@@ -500,7 +482,6 @@ export default function App() {
         <header className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-3">
             <LogoMark />
-            
           </div>
           <div className="flex items-center gap-2">
             <select
@@ -513,16 +494,6 @@ export default function App() {
               ))}
             </select>
             <button className={`px-3 py-1 rounded-md border ${isDark ? "bg-slate-800 border-slate-600 hover:bg-slate-700" : "bg-white border-neutral-300 hover:bg-neutral-50"}`} onClick={() => startGame(size)}>New</button>
-            <select
-              className={`px-2 py-1 rounded-md border ${isDark ? "bg-slate-800 border-slate-600" : "bg-white border-neutral-300"}`}
-              value={theme}
-              onChange={(e) => setTheme((e.target as HTMLSelectElement).value as Theme)}
-              title="Theme"
-            >
-              <option value="system">System</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
-            </select>
           </div>
         </header>
 
@@ -533,7 +504,7 @@ export default function App() {
             <div className="font-mono flex items-center gap-2">
               <span>Solved {solvedCount}/{size}</span>
               <span className="relative">
-                <span className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-neutral-300'} px-2 py-0.5 rounded-md border transition-transform ${scoreFlash && scoreFlash.v>0 ? 'scale-110' : ''}` }>Points {score}</span>
+                <span className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-neutral-300'} px-2 py-0.5 rounded-md border transition-transform ${scoreFlash && scoreFlash.v>0 ? 'scale-110' : ''}` }>Energy {displayScore}</span>
                 {scoreFlash && (
                   <span
                     key={scoreFlash.key}
@@ -554,13 +525,13 @@ export default function App() {
           </div>
         </div>
 
-        {/* Legend + quick hint */}
-        <div className={`rounded-lg border ${isDark ? "bg-slate-800 border-slate-600" : "bg-slate-50 border"} p-3 text-sm mb-4`}>
-          <div className="grid grid-cols-4 gap-2">
-            <LegendBox isDark={isDark} color={isDark?"bg-emerald-600":"bg-green-300"} icon="★" label="Correct cell" />
-            <LegendBox isDark={isDark} color={isDark?"bg-orange-600":"bg-orange-300"} icon="↔︎" label="Right row" />
-            <LegendBox isDark={isDark} color={isDark?"bg-amber-600":"bg-yellow-300"} icon="↕︎" label="Right column" />
-            <LegendBox isDark={isDark} color={isDark?"bg-slate-600":"bg-neutral-300"} icon="✕" label="Not in row/col" />
+        {/* Legend (mobile: icons only) */}
+        <div className={`rounded-lg border bg-white border-neutral-300 p-3 mb-4`}>
+            <div className="grid grid-cols-4 gap-2 place-items-center">
+            <LegendBox color="bg-green-300" icon="★" label="Correct cell" compact />
+            <LegendBox color="bg-orange-300" iconNode={<ArrowIcon dir="h" size={34} />} label="Right row" compact />
+            <LegendBox color="bg-yellow-300" iconNode={<ArrowIcon dir="v" size={34} />} label="Right column" compact />
+            <LegendBox color="bg-neutral-300" icon="✕" label="Not in row/col" compact />
           </div>
         </div>
 
@@ -717,6 +688,7 @@ export default function App() {
         {won && !hideWin && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
             <div className={`w-full max-w-sm rounded-2xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-neutral-200'} p-5 text-center`}>
+              <div className="flex justify-center mb-3"><LogoMark /></div>
               <h2 className="text-2xl font-bold mb-2">🎉 You solved all words!</h2>
               <p className="mb-4 text-sm opacity-90">Great job on a {size}×{size} board.</p>
               <div className="grid grid-cols-3 gap-2 mb-4 text-sm">
@@ -729,8 +701,8 @@ export default function App() {
                   <div className="font-mono text-lg">{Math.floor(seconds/60)}:{String(seconds%60).padStart(2,'0')}</div>
                 </div>
                 <div className={`rounded-lg ${isDark ? 'bg-slate-800' : 'bg-neutral-100'} p-3`}>
-                  <div className="opacity-70">Points</div>
-                  <div className="font-mono text-lg">{score}</div>
+                  <div className="opacity-70">Energy</div>
+                  <div className="font-mono text-lg">{displayScore}</div>
                 </div>
               </div>
               <div className="flex gap-2 justify-center">
@@ -742,7 +714,7 @@ export default function App() {
                 <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => startGame(size)}>Play again</button>
                 <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => {
                   const url = typeof window !== 'undefined' ? window.location.href : '';
-                  const text = `I solved a ${size}×${size} WORDGAMI in ${moves} moves and ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}! Points ${score}.`;
+                  const text = `I solved a ${size}×${size} WORDGAMI in ${moves} moves and ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}! Energy ${displayScore}.`;
                   const share = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
                   window.open(share, '_blank');
                 }}>Share</button>
@@ -756,6 +728,7 @@ export default function App() {
         {lost && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
             <div className={`w-full max-w-sm rounded-2xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-neutral-200'} p-5 text-center`}>
+              <div className="flex justify-center mb-3"><LogoMark /></div>
               <h2 className="text-2xl font-bold mb-2">⏳ Out of time</h2>
               <p className="mb-4 text-sm opacity-90">Your meter hit zero. Try a more efficient path!</p>
               <div className="grid grid-cols-3 gap-2 mb-4 text-sm">
@@ -768,8 +741,8 @@ export default function App() {
                   <div className="font-mono text-lg">{Math.floor(seconds/60)}:{String(seconds%60).padStart(2,'0')}</div>
                 </div>
                 <div className={`rounded-lg ${isDark ? 'bg-slate-800' : 'bg-neutral-100'} p-3`}>
-                  <div className="opacity-70">Points</div>
-                  <div className="font-mono text-lg">{score}</div>
+                  <div className="opacity-70">Energy</div>
+                  <div className="font-mono text-lg">{displayScore}</div>
                 </div>
               </div>
               <div className="flex gap-2 justify-center">
@@ -784,11 +757,46 @@ export default function App() {
 }
 
 // --------- Small legend box component (declared after default export, fine in TS/JS)
-function LegendBox({ isDark, color, icon, label }: { isDark: boolean; color: string; icon: string; label: string }) {
+function ArrowIcon({ dir, size = 34, color = "#111", stroke = 2.5 }: { dir: "h" | "v"; size?: number; color?: string; stroke?: number }) {
+  const rot = dir === "h" ? 0 : 90;
   return (
-    <div className={`flex items-center gap-2 p-2 rounded-lg border ${isDark ? 'border-slate-600 bg-slate-800/50' : 'border-neutral-300 bg-white/70'}`}>
-      <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-xl sm:text-2xl font-bold ${color} shadow-inner`}>{icon}</div>
-      <div className="text-xs font-medium">{label}</div>
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      style={{ transform: `rotate(${rot}deg)` }}
+      fill="none"
+      stroke={color}
+      strokeWidth={stroke}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 12h18" />
+      <path d="M7 8l-4 4 4 4" />
+      <path d="M17 8l4 4-4 4" />
+    </svg>
+  );
+}
+
+function LegendBox({ color, icon, iconNode, label, compact = false }: { color: string; icon?: string; iconNode?: ReactNode; label: string; compact?: boolean }) {
+  const containerCls = compact ? "flex items-center justify-center p-0" : "flex items-center gap-2 p-1";
+  return (
+    <div className={containerCls}>
+      {/* Icon tile styled exactly like a game tile (border + 3D shadow + gloss) */}
+      <div
+        className={`relative w-14 h-14 sm:w-16 sm:h-16 rounded-xl ${color} border border-neutral-300 shadow-[0_4px_0_rgba(0,0,0,.18)] flex items-center justify-center leading-none`}
+        aria-hidden
+      >
+        <span className="pointer-events-none absolute inset-0 rounded-xl" style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.0) 60%)' }} />
+        {iconNode ? (
+          <span className="flex items-center justify-center">{iconNode}</span>
+        ) : (
+          <span className="text-neutral-900 text-4xl sm:text-5xl font-black">{icon}</span>
+        )}
+      </div>
+      {/* Hide label on mobile when compact; visible on larger screens */}
+      <div className={`${compact ? 'hidden sm:block' : ''} text-xs font-medium`}>{label}</div>
     </div>
   );
 }
@@ -801,17 +809,20 @@ function LogoMark() {
     { ch: 'W', tone: 'g' }, { ch: 'O', tone: 'g' }, { ch: 'R', tone: 'g' }, { ch: 'D', tone: 'g' },
     { ch: 'G', tone: 'g' }, { ch: 'A', tone: 'g' }, { ch: 'M', tone: 'g' }, { ch: 'I', tone: 'o' },
   ];
+
   const tileBorder = 'border border-neutral-300';
-  const tileShadow = 'shadow-[0_3px_0_rgba(0,0,0,.15)]';
-  const tileGreen = 'bg-green-300';
-  const tileOrange = 'bg-orange-300';
-  const textColor = 'text-neutral-900';
+  const shadow = 'shadow-[0_4px_0_rgba(0,0,0,.18)]';
+  const gloss: CSSProperties = { background: 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.0) 60%)' };
+
   return (
-    <div className="inline-grid grid-cols-4 gap-1" role="img" aria-label="WORD (green) / GAMI (I orange) logo tiles">
+    <div className="grid grid-cols-4 gap-1" aria-hidden="true">
       {tiles.map((t, i) => (
-        <div key={i} className={`relative w-8 h-8 sm:w-9 sm:h-9 rounded-lg ${t.tone==='g'?tileGreen:tileOrange} ${tileBorder} ${tileShadow} flex items-center justify-center font-black text-base sm:text-lg leading-none`}>
-          <span className="pointer-events-none absolute inset-0 rounded-lg" style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.0) 60%)' }} />
-          <span className={textColor}>{t.ch}</span>
+        <div
+          key={i}
+          className={`relative w-7 h-7 sm:w-9 sm:h-9 rounded-lg ${t.tone==='g' ? 'bg-green-300' : 'bg-orange-300'} ${tileBorder} ${shadow}`}
+        >
+          <span className="pointer-events-none absolute inset-0 rounded-lg" style={gloss} />
+          <span className="absolute inset-0 flex items-center justify-center text-neutral-900 font-black text-xs sm:text-sm">{t.ch}</span>
         </div>
       ))}
     </div>
