@@ -51,7 +51,7 @@ const WORDS: Record<number, string[]> = {
 const rand = (n: number) => Math.floor(Math.random() * n);
 const idx = (r: number, c: number, size: number) => r * size + c;
 const rc = (i: number, size: number) => ({ r: Math.floor(i / size), c: i % size });
-const swapArr = <T,>(a: T[], i: number, j: number) => { const t = a[i]; a[i] = a[j]; a[j] = t; };
+function swapArr<T>(a: T[], i: number, j: number) { const t = a[i]; a[i] = a[j]; a[j] = t; }
 
 function rowString(board: Tile[], size: number, r: number) {
   let s = "";
@@ -256,6 +256,10 @@ export default function App() {
   const initialTouch = typeof window !== "undefined" && (("ontouchstart" in window) || (navigator as any).maxTouchPoints > 0);
   const [isTouch, setIsTouch] = useState(initialTouch);
 
+  // Interstitial ad gate between games
+  const [showInterAd, setShowInterAd] = useState(false);
+  const [pendingStart, setPendingStart] = useState<{ size: number; word?: string } | null>(null);
+
   useEffect(() => { setIsTouch((("ontouchstart" in window) || (navigator as any).maxTouchPoints > 0)); }, []);
 
   const isDark = false; // force light mode; hide theme switch
@@ -416,6 +420,11 @@ export default function App() {
     setHideWin(false);
   }
 
+  function queueNewGame(newSize = size, maybeWord?: string) {
+    setPendingStart({ size: newSize, word: maybeWord });
+    setShowInterAd(true);
+  }
+
   function handleTileClick(i: number) {
     if (won || lost) return;
     const r = rc(i, size).r;
@@ -449,6 +458,9 @@ export default function App() {
     <div className={`${isDark ? "bg-slate-900 text-slate-100" : "bg-white text-neutral-900"} min-h-screen w-full overflow-x-hidden`}>
       {/* Lightweight keyframes for score pop and row bounce */}
       <style>{GLOBAL_CSS}</style>
+      {/* Desktop side ad placeholders (fixed; do not affect layout) */}
+      <div className="hidden lg:block fixed left-4 top-28 z-10"><AdBox variant="skyscraper" /></div>
+      <div className="hidden lg:block fixed right-4 top-28 z-10"><AdBox variant="skyscraper" /></div>
       <div className="max-w-3xl mx-auto p-4 select-none">
         {/* Intro overlay (first visit) */}
         {showIntro && (
@@ -487,13 +499,13 @@ export default function App() {
             <select
               className={`px-2 py-1 rounded-md border ${isDark ? "bg-slate-800 border-slate-600" : "bg-white border-neutral-300"}`}
               value={size}
-              onChange={(e) => startGame(parseInt(e.target.value, 10))}
+              onChange={(e) => queueNewGame(parseInt(e.target.value, 10))}
             >
               {[3, 4, 5, 6].map((n) => (
                 <option key={n} value={n}>{n}×{n}</option>
               ))}
             </select>
-            <button className={`px-3 py-1 rounded-md border ${isDark ? "bg-slate-800 border-slate-600 hover:bg-slate-700" : "bg-white border-neutral-300 hover:bg-neutral-50"}`} onClick={() => startGame(size)}>New</button>
+            <button className={`px-3 py-1 rounded-md border ${isDark ? "bg-slate-800 border-slate-600 hover:bg-slate-700" : "bg-white border-neutral-300 hover:bg-neutral-50"}`} onClick={() => queueNewGame(size)}>New</button>
           </div>
         </header>
 
@@ -619,6 +631,11 @@ export default function App() {
           })}
         </div>
 
+        {/* Under-grid banner ad placeholder */}
+        <div className="mt-4">
+          <AdBox variant="banner" />
+        </div>
+
         {/* Dev tests (trimmed to core invariants) */}
         <details className="mt-6 text-sm">
           <summary className="cursor-pointer select-none">Run dev tests</summary>
@@ -707,11 +724,11 @@ export default function App() {
               </div>
               <div className="flex gap-2 justify-center">
                 {canNext && (
-                  <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => startGame(nextSize)}>
+                  <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => queueNewGame(nextSize)}>
                     Next level {nextSize}×{nextSize}
                   </button>
                 )}
-                <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => startGame(size)}>Play again</button>
+                <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => queueNewGame(size)}>Play again</button>
                 <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => {
                   const url = typeof window !== 'undefined' ? window.location.href : '';
                   const text = `I solved a ${size}×${size} WORDGAMI in ${moves} moves and ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}! Energy ${displayScore}.`;
@@ -746,7 +763,30 @@ export default function App() {
                 </div>
               </div>
               <div className="flex gap-2 justify-center">
-                <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => startGame(size)}>Try again</button>
+                <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => queueNewGame(size)}>Try again</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Interstitial between games */}
+        {showInterAd && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className={`w-full max-w-md rounded-2xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-neutral-200'} p-5 text-center`}>
+              <div className="flex justify-center mb-3"><LogoMark /></div>
+              <AdBox variant="banner" />
+              <div className="mt-4 text-right">
+                <button
+                  className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`}
+                  onClick={() => {
+                    setShowInterAd(false);
+                    const p = pendingStart;
+                    setPendingStart(null);
+                    if (p) startGame(p.size, p.word);
+                  }}
+                >
+                  Continue
+                </button>
               </div>
             </div>
           </div>
@@ -791,40 +831,57 @@ function LegendBox({ color, icon, iconNode, label, compact = false }: { color: s
         <span className="pointer-events-none absolute inset-0 rounded-xl" style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.0) 60%)' }} />
         {iconNode ? (
           <span className="flex items-center justify-center">{iconNode}</span>
-        ) : (
-          <span className="text-neutral-900 text-4xl sm:text-5xl font-black">{icon}</span>
+        ) : (<span className="text-neutral-900 text-2xl">{icon ?? ""}</span>
         )}
       </div>
-      {/* Hide label on mobile when compact; visible on larger screens */}
-      <div className={`${compact ? 'hidden sm:block' : ''} text-xs font-medium`}>{label}</div>
+      {!compact && (
+        <span className="ml-2 text-sm">{label}</span>
+      )}
     </div>
   );
 }
 
-// --- Logo composed of 4×2 mini-tiles: top WORD (green letters), bottom GAMI (G/A/M green, I orange)
+// Simple 2-row tile logo: WORD (all green) / GAMI (GAM green, I orange)
 function LogoMark() {
-  // Always render logo tiles like LIGHT theme game tiles on white bg
-  // (colored tile backgrounds, dark letters, light glossy overlay)
-  const tiles: { ch: string; tone: 'g' | 'o' }[] = [
-    { ch: 'W', tone: 'g' }, { ch: 'O', tone: 'g' }, { ch: 'R', tone: 'g' }, { ch: 'D', tone: 'g' },
-    { ch: 'G', tone: 'g' }, { ch: 'A', tone: 'g' }, { ch: 'M', tone: 'g' }, { ch: 'I', tone: 'o' },
-  ];
-
-  const tileBorder = 'border border-neutral-300';
-  const shadow = 'shadow-[0_4px_0_rgba(0,0,0,.18)]';
-  const gloss: CSSProperties = { background: 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.0) 60%)' };
-
+  const TileBox = ({ ch, bg }: { ch: string; bg: string }) => (
+    <div
+      className={`relative w-9 h-9 sm:w-10 sm:h-10 rounded-lg ${bg} border border-neutral-300 shadow-[0_4px_0_rgba(0,0,0,.18)] flex items-center justify-center font-extrabold`}
+    >
+      <span
+        className="pointer-events-none absolute inset-0 rounded-lg"
+        style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.0) 60%)' }}
+      />
+      <span className="text-neutral-900">{ch}</span>
+    </div>
+  );
   return (
-    <div className="grid grid-cols-4 gap-1" aria-hidden="true">
-      {tiles.map((t, i) => (
-        <div
-          key={i}
-          className={`relative w-7 h-7 sm:w-9 sm:h-9 rounded-lg ${t.tone==='g' ? 'bg-green-300' : 'bg-orange-300'} ${tileBorder} ${shadow}`}
-        >
-          <span className="pointer-events-none absolute inset-0 rounded-lg" style={gloss} />
-          <span className="absolute inset-0 flex items-center justify-center text-neutral-900 font-black text-xs sm:text-sm">{t.ch}</span>
-        </div>
-      ))}
+    <div className="inline-grid grid-cols-4 gap-1.5" aria-hidden>
+      {/* Row 1 */}
+      <TileBox ch="W" bg="bg-green-300" />
+      <TileBox ch="O" bg="bg-green-300" />
+      <TileBox ch="R" bg="bg-green-300" />
+      <TileBox ch="D" bg="bg-green-300" />
+      {/* Row 2 */}
+      <TileBox ch="G" bg="bg-green-300" />
+      <TileBox ch="A" bg="bg-green-300" />
+      <TileBox ch="M" bg="bg-green-300" />
+      <TileBox ch="I" bg="bg-orange-300" />
+    </div>
+  );
+}
+
+// Placeholder ad blocks used during development / before AdSense wiring
+function AdBox({ variant }: { variant: 'banner' | 'skyscraper' }) {
+  if (variant === 'skyscraper') {
+    return (
+      <div className="w-40 h-[600px] rounded-xl border border-neutral-300 bg-neutral-100 flex items-center justify-center text-neutral-500 text-sm select-none">
+        Ad Placeholder
+      </div>
+    );
+  }
+  return (
+    <div className="w-full h-24 rounded-xl border border-neutral-300 bg-neutral-100 flex items-center justify-center text-neutral-500 text-sm select-none">
+      Ad Placeholder
     </div>
   );
 }
