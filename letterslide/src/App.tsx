@@ -26,7 +26,7 @@ type RowSecret = { word: string };
 // ---------- Tunables (scoring / meter)
 const SCORE_START = 100;           // initial meter (also the visual bar cap)
 const SCORE_CAP = 100;             // max shown in the bar (we clamp for clarity)
-const DECAY_PER_SEC = 1.5;         // continuous decay per second
+const DECAY_PER_SEC = 1;           // continuous decay per second
 const MOVE_PENALTY = 2;            // cost per swap
 const GREEN_BONUS = 5;             // reward when a tile becomes green for the first time
 const ROW_SOLVED_BONUS_PER_SIZE = 5; // per-size bonus when a row locks (5 * size)
@@ -215,9 +215,6 @@ function newlyGreenIDs(prev: Map<number, Hint>, next: Map<number, Hint>, already
   });
   return gained;
 }
-
-// ---------- Light-only UI (isDark forced false per prior request)
-
 
 // ======================================================
 // App (single mode — free solve)
@@ -459,7 +456,7 @@ export default function App() {
   const displayScore = Math.max(0, Math.round(score));
 
   return (
-    <div className={`${isDark ? "bg-slate-900 text-slate-100" : "bg-white text-neutral-900"} min-h-screen w-full overflow-x-hidden`}>
+    <div className={`min-h-screen w-full overflow-x-hidden ${"bg-white text-neutral-900"}`}>
       {/* Lightweight keyframes for score pop and row bounce */}
       <style>{GLOBAL_CSS}</style>
       {/* Desktop side ad placeholders (fixed; do not affect layout) */}
@@ -469,9 +466,9 @@ export default function App() {
         {/* Intro overlay (first visit) */}
         {showIntro && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className={`w-full max-w-lg rounded-2xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-neutral-200'} p-6`}>
+            <div className={`w-full max-w-lg rounded-2xl border bg-white border-neutral-200 p-6`}>
               <div className="flex justify-center mb-3"><LogoMark /></div>
-<h2 className="text-2xl font-bold mb-1">How to play</h2>
+              <h2 className="text-2xl font-bold mb-1">How to play</h2>
               <p className="opacity-80 mb-4">Swap <strong>any two tiles</strong> by clicking (select + select) or dragging one onto another. Solve all hidden words. Colors mean:</p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5 text-center">
                 <LegendBox color="bg-green-300" icon="★" label="Correct cell" />
@@ -484,7 +481,7 @@ export default function App() {
               </div>
               <div className="text-right">
                 <button
-                  className={`px-4 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`}
+                  className={`px-4 py-2 rounded-md border bg-white border-neutral-300 hover:bg-neutral-50`}
                   onClick={() => { setShowIntro(false); startGame(3); }}
                 >
                   Ready to play
@@ -501,7 +498,7 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2">
             <select
-              className={`px-2 py-1 rounded-md border ${isDark ? "bg-slate-800 border-slate-600" : "bg-white border-neutral-300"}`}
+              className={`px-2 py-1 rounded-md border bg-white border-neutral-300`}
               value={size}
               onChange={(e) => queueNewGame(parseInt(e.target.value, 10))}
             >
@@ -509,7 +506,7 @@ export default function App() {
                 <option key={n} value={n}>{n}×{n}</option>
               ))}
             </select>
-            <button className={`px-3 py-1 rounded-md border ${isDark ? "bg-slate-800 border-slate-600 hover:bg-slate-700" : "bg-white border-neutral-300 hover:bg-neutral-50"}`} onClick={() => queueNewGame(size)}>New</button>
+            <button className={`px-3 py-1 rounded-md border bg-white border-neutral-300 hover:bg-neutral-50`} onClick={() => queueNewGame(size)}>New</button>
           </div>
         </header>
 
@@ -520,7 +517,7 @@ export default function App() {
             <div className="font-mono flex items-center gap-2">
               <span>Solved {solvedCount}/{size}</span>
               <span className="relative">
-                <span className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-neutral-300'} px-2 py-0.5 rounded-md border transition-transform ${scoreFlash && scoreFlash.v>0 ? 'scale-110' : ''}` }>Energy {displayScore}</span>
+                <span className={`bg-white border-neutral-300 px-2 py-0.5 rounded-md border transition-transform ${scoreFlash && scoreFlash.v>0 ? 'scale-110' : ''}` }>Energy {displayScore}</span>
                 {scoreFlash && (
                   <span
                     key={scoreFlash.key}
@@ -533,7 +530,7 @@ export default function App() {
               </span>
             </div>
           </div>
-          <div className={`h-2 w-full rounded-full ${isDark? 'bg-slate-800':'bg-neutral-200'} overflow-hidden ${low ? 'ring-2 ring-rose-400 animate-pulse' : ''}`}>
+          <div className={`h-2 w-full rounded-full bg-neutral-200 overflow-hidden ${low ? 'ring-2 ring-rose-400 animate-pulse' : ''}`}>
             <div
               className={`h-full ${low ? 'bg-gradient-to-r from-rose-600 via-orange-500 to-amber-400 animate-pulse' : 'bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-300'}`}
               style={{ width: `${meterPct}%`, transition: 'width 250ms linear' }}
@@ -554,7 +551,7 @@ export default function App() {
         {/* Board */}
         <div
           ref={gridRef}
-          className={`grid gap-2 ${isDark ? "text-slate-100" : "text-neutral-900"}`}
+          className={`grid gap-2 text-neutral-900`}
           style={{
             gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))`,
             touchAction: isTouch ? "none" : "auto",
@@ -563,17 +560,17 @@ export default function App() {
           }}
         >
           {tilesToRender.map((t, i) => {
-            let base = isDark ? "bg-slate-700" : "bg-white";
+            let base = "bg-white";
             const { r } = rc(i, size);
             const locked = isRowLocked(r);
 
-            if (locked) base = isDark ? "bg-emerald-800" : "bg-green-200";
+            if (locked) base = "bg-green-200";
             else {
               const mark = marks.get(t.id);
-              base = mark === "g" ? (isDark ? "bg-emerald-600" : "bg-green-300")
-                   : mark === "o" ? (isDark ? "bg-orange-600" : "bg-orange-300")
-                   : mark === "y" ? (isDark ? "bg-amber-600" : "bg-yellow-300")
-                   : mark === "x" ? (isDark ? "bg-slate-600" : "bg-neutral-300")
+              base = mark === "g" ? "bg-green-300"
+                   : mark === "o" ? "bg-orange-300"
+                   : mark === "y" ? "bg-yellow-300"
+                   : mark === "x" ? "bg-neutral-300"
                    : base;
             }
 
@@ -621,13 +618,13 @@ export default function App() {
 
                 onClick={() => handleTileClick(i)}
                 style={{ ...styleTrans, ...styleAnim }}
-                className={`relative aspect-square rounded-xl border ${isDark ? "border-slate-600" : "border-neutral-300"} ${base}
+                className={`relative aspect-square rounded-xl border border-neutral-300 ${base}
                             flex items-center justify-center text-xl font-bold
                             ${isSel ? "ring-2 ring-sky-500" : canSwap ? "ring-2 ring-sky-300" : ""}
                             ${locked ? "cursor-not-allowed pointer-events-none opacity-95" : "cursor-pointer"}
                             shadow-[0_4px_0_rgba(0,0,0,.18)]`}
               >
-                <span className="pointer-events-none absolute inset-0 rounded-xl" style={{ background: isDark ? 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.0) 55%)' : 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.0) 60%)' }} />
+                <span className="pointer-events-none absolute inset-0 rounded-xl" style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.0) 60%)' }} />
                 {t.char}
                 {locked && <span className="absolute top-1 right-1 text-xs opacity-70">🔒</span>}
               </button>
@@ -645,7 +642,7 @@ export default function App() {
           <summary className="cursor-pointer select-none">Run dev tests</summary>
           <div className="mt-2 flex gap-2">
             <button
-              className={`px-3 py-1 rounded-md border ${isDark ? "bg-slate-800 border-slate-600 hover:bg-slate-700" : "bg-white border-neutral-300 hover:bg-neutral-50"}`}
+              className={`px-3 py-1 rounded-md border bg-white border-neutral-300 hover:bg-neutral-50`}
               onClick={() => {
                 const results: { name: string; passed: boolean }[] = [];
 
@@ -697,6 +694,13 @@ export default function App() {
                   results.push({ name: "newlyGreenIDs finds all at start", passed: gained.length === 9 });
                 }
 
+                // No row starts solved
+                {
+                  const camp2 = makeCampaignBoard(5);
+                  const noneSolved = camp2.words.every((w, r) => rowString(camp2.board, 5, r) !== w);
+                  results.push({ name: "no row starts solved", passed: noneSolved });
+                }
+
                 alert(results.map((r) => `${r.passed ? "✅" : "❌"} ${r.name}`).join("\n"));
               }}
             >
@@ -708,38 +712,38 @@ export default function App() {
         {/* Win overlay */}
         {won && !hideWin && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className={`w-full max-w-sm rounded-2xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-neutral-200'} p-5 text-center`}>
+            <div className={`w-full max-w-sm rounded-2xl border bg-white border-neutral-200 p-5 text-center`}>
               <div className="flex justify-center mb-3"><LogoMark /></div>
               <h2 className="text-2xl font-bold mb-2">🎉 You solved all words!</h2>
               <p className="mb-4 text-sm opacity-90">Great job on a {size}×{size} board.</p>
               <div className="grid grid-cols-3 gap-2 mb-4 text-sm">
-                <div className={`rounded-lg ${isDark ? 'bg-slate-800' : 'bg-neutral-100'} p-3`}>
+                <div className={`rounded-lg bg-neutral-100 p-3`}>
                   <div className="opacity-70">Moves</div>
                   <div className="font-mono text-lg">{moves}</div>
                 </div>
-                <div className={`rounded-lg ${isDark ? 'bg-slate-800' : 'bg-neutral-100'} p-3`}>
+                <div className={`rounded-lg bg-neutral-100 p-3`}>
                   <div className="opacity-70">Time</div>
                   <div className="font-mono text-lg">{Math.floor(seconds/60)}:{String(seconds%60).padStart(2,'0')}</div>
                 </div>
-                <div className={`rounded-lg ${isDark ? 'bg-slate-800' : 'bg-neutral-100'} p-3`}>
+                <div className={`rounded-lg bg-neutral-100 p-3`}>
                   <div className="opacity-70">Energy</div>
                   <div className="font-mono text-lg">{displayScore}</div>
                 </div>
               </div>
               <div className="flex gap-2 justify-center">
                 {canNext && (
-                  <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => queueNewGame(nextSize)}>
+                  <button className={`px-3 py-2 rounded-md border bg-white border-neutral-300 hover:bg-neutral-50`} onClick={() => queueNewGame(nextSize)}>
                     Next level {nextSize}×{nextSize}
                   </button>
                 )}
-                <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => queueNewGame(size)}>Play again</button>
-                <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => {
+                <button className={`px-3 py-2 rounded-md border bg-white border-neutral-300 hover:bg-neutral-50`} onClick={() => queueNewGame(size)}>Play again</button>
+                <button className={`px-3 py-2 rounded-md border bg-white border-neutral-300 hover:bg-neutral-50`} onClick={() => {
                   const url = typeof window !== 'undefined' ? window.location.href : '';
                   const text = `I solved a ${size}×${size} WORDGAMI in ${moves} moves and ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}! Energy ${displayScore}.`;
                   const share = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
                   window.open(share, '_blank');
                 }}>Share</button>
-                <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => setHideWin(true)}>Close</button>
+                <button className={`px-3 py-2 rounded-md border bg-white border-neutral-300 hover:bg-neutral-50`} onClick={() => setHideWin(true)}>Close</button>
               </div>
             </div>
           </div>
@@ -748,26 +752,26 @@ export default function App() {
         {/* Loss overlay */}
         {lost && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className={`w-full max-w-sm rounded-2xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-neutral-200'} p-5 text-center`}>
+            <div className={`w-full max-w-sm rounded-2xl border bg-white border-neutral-200 p-5 text-center`}>
               <div className="flex justify-center mb-3"><LogoMark /></div>
               <h2 className="text-2xl font-bold mb-2">⏳ Out of time</h2>
               <p className="mb-4 text-sm opacity-90">Your meter hit zero. Try a more efficient path!</p>
               <div className="grid grid-cols-3 gap-2 mb-4 text-sm">
-                <div className={`rounded-lg ${isDark ? 'bg-slate-800' : 'bg-neutral-100'} p-3`}>
+                <div className={`rounded-lg bg-neutral-100 p-3`}>
                   <div className="opacity-70">Moves</div>
                   <div className="font-mono text-lg">{moves}</div>
                 </div>
-                <div className={`rounded-lg ${isDark ? 'bg-slate-800' : 'bg-neutral-100'} p-3`}>
+                <div className={`rounded-lg bg-neutral-100 p-3`}>
                   <div className="opacity-70">Time</div>
                   <div className="font-mono text-lg">{Math.floor(seconds/60)}:{String(seconds%60).padStart(2,'0')}</div>
                 </div>
-                <div className={`rounded-lg ${isDark ? 'bg-slate-800' : 'bg-neutral-100'} p-3`}>
+                <div className={`rounded-lg bg-neutral-100 p-3`}>
                   <div className="opacity-70">Energy</div>
                   <div className="font-mono text-lg">{displayScore}</div>
                 </div>
               </div>
               <div className="flex gap-2 justify-center">
-                <button className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`} onClick={() => queueNewGame(size)}>Try again</button>
+                <button className={`px-3 py-2 rounded-md border bg-white border-neutral-300 hover:bg-neutral-50`} onClick={() => queueNewGame(size)}>Try again</button>
               </div>
             </div>
           </div>
@@ -776,12 +780,12 @@ export default function App() {
         {/* Interstitial between games */}
         {showInterAd && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className={`w-full max-w-md rounded-2xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-neutral-200'} p-5 text-center`}>
+            <div className={`w-full max-w-md rounded-2xl border bg-white border-neutral-200 p-5 text-center`}>
               <div className="flex justify-center mb-3"><LogoMark /></div>
               <AdBox variant="banner" />
               <div className="mt-4 text-right">
                 <button
-                  className={`px-3 py-2 rounded-md border ${isDark ? 'bg-slate-800 border-slate-600 hover:bg-slate-700' : 'bg-white border-neutral-300 hover:bg-neutral-50'}`}
+                  className={`px-3 py-2 rounded-md border bg-white border-neutral-300 hover:bg-neutral-50`}
                   onClick={() => {
                     setShowInterAd(false);
                     const p = pendingStart;
@@ -800,7 +804,7 @@ export default function App() {
   );
 }
 
-// --------- Small legend box component (declared after default export, fine in TS/JS)
+// --------- Small legend box component and icons
 function ArrowIcon({ dir, size = 34, color = "#111", stroke = 2.5 }: { dir: "h" | "v"; size?: number; color?: string; stroke?: number }) {
   const rot = dir === "h" ? 0 : 90;
   return (
@@ -832,46 +836,91 @@ function LegendBox({ color, icon, iconNode, label, compact = false }: { color: s
         className={`relative w-14 h-14 sm:w-16 sm:h-16 rounded-xl ${color} border border-neutral-300 shadow-[0_4px_0_rgba(0,0,0,.18)] flex items-center justify-center leading-none`}
         aria-hidden
       >
-        <span className="pointer-events-none absolute inset-0 rounded-xl" style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.0) 60%)' }} />
-        {iconNode ? (
-          iconNode
-        ) : (
-          <span className="text-2xl font-black select-none">{icon}</span>
-        )}
+        <span
+          className="pointer-events-none absolute inset-0 rounded-xl"
+          style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.0) 60%)' }}
+        />
+        {iconNode ? iconNode : <span className="text-neutral-900 text-xl">{icon}</span>}
       </div>
-      {!compact && <span className="text-sm select-none">{label}</span>}
+      {!compact && <div className="text-xs opacity-80 pl-1">{label}</div>}
     </div>
   );
 }
 
+// --------- AdBox (placeholder / AdSense slot container)
 function AdBox({ variant }: { variant: "banner" | "skyscraper" }) {
-  const dims = variant === "banner" ? "w-full h-24" : "w-40 h-[300px]";
+  const ADSENSE_CLIENT = "ca-pub-7073157492816428"; // if loader script is in index.html, this is used by ins
+  const AD_SLOTS = { banner: "0000000000", skyscraper: "0000000000" } as const; // replace with real slots when ready
+
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const [wh, setWH] = useState<{ w: number; h: number }>(() =>
+    variant === "banner" ? { w: 728, h: 90 } : { w: 160, h: 600 }
+  );
+
+  useEffect(() => {
+    const mobile = window.innerWidth < 768;
+    setWH(variant === "banner" ? (mobile ? { w: 320, h: 50 } : { w: 728, h: 90 }) : { w: 160, h: 600 });
+  }, [variant]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    host.innerHTML = "";
+
+    const ins = document.createElement("ins");
+    ins.className = "adsbygoogle";
+    ins.style.display = "inline-block";
+    ins.style.width = `${wh.w}px`;
+    ins.style.height = `${wh.h}px`;
+    ins.setAttribute("data-ad-client", ADSENSE_CLIENT);
+
+    const slot = variant === "banner" ? AD_SLOTS.banner : AD_SLOTS.skyscraper;
+    if (slot !== "0000000000") ins.setAttribute("data-ad-slot", slot); else ins.setAttribute("data-adtest", "on");
+
+    host.appendChild(ins);
+
+    try {
+      // If AdSense is present, request fill; otherwise placeholder remains
+      (window as any).adsbygoogle = (window as any).adsbygoogle || [];
+      (window as any).adsbygoogle.push({});
+    } catch {
+      // ignore
+    }
+
+    return () => { host.innerHTML = ""; };
+  }, [variant, wh.w, wh.h]);
+
   return (
-    <div className={`${dims} border border-neutral-300 bg-neutral-50 text-neutral-500 rounded-xl flex items-center justify-center select-none`}>Ad Placeholder</div>
+    <div
+      ref={hostRef}
+      className="mx-auto flex items-center justify-center border border-neutral-200 bg-white rounded-lg"
+      style={{ width: wh.w, height: wh.h }}
+    />
   );
 }
 
+// --------- LogoMark (two rows, tiles match game style)
 function LogoMark() {
-  const tileBase = "relative w-10 h-10 sm:w-12 sm:h-12 rounded-xl border border-neutral-300 shadow-[0_4px_0_rgba(0,0,0,.18)] flex items-center justify-center text-sm sm:text-base font-extrabold";
-  const gloss = <span className="pointer-events-none absolute inset-0 rounded-xl" style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.0) 60%)' }} />;
-  const Tile = ({ ch, color }: { ch: string; color: string }) => (
-    <div className={`${tileBase} ${color}`}>
-      {gloss}
+  const TileLogo = ({ ch, color }: { ch: string; color: string }) => (
+    <div className={`relative w-10 h-10 sm:w-12 sm:h-12 rounded-xl ${color} border border-neutral-300 shadow-[0_4px_0_rgba(0,0,0,.18)] flex items-center justify-center text-base sm:text-lg font-bold text-neutral-900`}>
+      <span className="pointer-events-none absolute inset-0 rounded-xl" style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.0) 55%)' }} />
       {ch}
     </div>
   );
   return (
-    <div className="grid grid-cols-4 gap-2">
-      {/* WORD */}
-      <Tile ch="W" color="bg-green-300" />
-      <Tile ch="O" color="bg-green-300" />
-      <Tile ch="R" color="bg-green-300" />
-      <Tile ch="D" color="bg-green-300" />
-      {/* GAMI */}
-      <Tile ch="G" color="bg-green-300" />
-      <Tile ch="A" color="bg-green-300" />
-      <Tile ch="M" color="bg-green-300" />
-      <Tile ch="I" color="bg-orange-300" />
+    <div className="flex flex-col gap-1" aria-label="WORDGAMI logo">
+      <div className="flex gap-1">
+        <TileLogo ch="W" color="bg-green-300" />
+        <TileLogo ch="O" color="bg-green-300" />
+        <TileLogo ch="R" color="bg-green-300" />
+        <TileLogo ch="D" color="bg-green-300" />
+      </div>
+      <div className="flex gap-1">
+        <TileLogo ch="G" color="bg-green-300" />
+        <TileLogo ch="A" color="bg-green-300" />
+        <TileLogo ch="M" color="bg-green-300" />
+        <TileLogo ch="I" color="bg-orange-300" />
+      </div>
     </div>
   );
 }
