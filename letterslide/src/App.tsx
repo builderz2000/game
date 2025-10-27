@@ -37,10 +37,10 @@ const WORDS: Record<number, string[]> = {
     "CAT","DOG","SUN","MAP","BOX","HAT","CAR","BUS","ANT","BEE","FOX","OWL","BAT","JAR","KEY","LIP","MUG","PEN","RUG","EGG"
   ],
   4: [
-    "CODE","GAME","PLAY","WORD","MATH","TREE","LEAF","FISH","BIRD","LION","WOLF","FIRE","WIND","SNOW","RAIN","STAR","MOON","SHIP","ROAD","BOOK","DOOR","MILK","BREAD","CORN"
+    "CODE","GAME","PLAY","WORD","MATH","TREE","LEAF","FISH","BIRD","LION","WOLF","FIRE","WIND","SNOW","RAIN","STAR","MOON","SHIP","ROAD","BOOK","DOOR","MILK","CORN"
   ],
   5: [
-    "APPLE","LEVEL","QUEST","TRAIL","SHIFT","ABOUT","AFTER","AGAIN","OTHER","HEART","PLANT","GRAPE","MANGO","TIGER","RIVER","MUSIC","LIGHT","SOUND","BREAD","WATER","EARTH","WORLD","SMILE","CHAIR","TABLE","POINT","RIGHT","UNDER","GREEN","BROWN","BLACK","WHITE","STONE","FIELD","HOUSE","BRICK","PLANE","TRAIN","CLOUD","STORM","SHINE","QUIET","NOISE","HAPPY","TIMES","QUICK","SWEET","SHARP","ROUND"
+    "APPLE","LEVEL","QUEST","TRAIL","SHIFT","ABOUT","AFTER","AGAIN","OTHER","HEART","PLANT","GRAPE","MANGO","TIGER","RIVER","MUSIC","LIGHT","SOUND","WATER","EARTH","WORLD","SMILE","CHAIR","TABLE","POINT","RIGHT","UNDER","GREEN","BROWN","BLACK","WHITE","STONE","FIELD","HOUSE","BRICK","PLANE","TRAIN","CLOUD","STORM","SHINE","QUIET","NOISE","HAPPY","TIMES","QUICK","SWEET","SHARP","ROUND"
   ],
   6: [
     "FLOWER","PUZZLE","BINARY","MARKET","BRIDGE","ORANGE","PURPLE","YELLOW","SILVER","NATURE","RIVERS","GALAXY","PLANET","STREAM","THINGS","LETTER","SPIRIT","WINDOW","GARDEN","SCHOOL","FRIEND","ANIMAL","PEOPLE","FUTURE","PENCIL","NUMBER","POCKET","CAMERA","PILLOW","MARKER","BUTTON","CHERRY","BANANA","BOTTLE","FOLLOW","SPRING","SUMMER","AUTUMN","WINTER","CANDLE","CRAYON","DANCER","ENGINE","FABRIC","GOBLET","HANDLE","INSECT"
@@ -68,28 +68,32 @@ function pickWord(size: number, preferred?: string) {
 
 // Campaign words and board
 function chooseCampaignWords(size: number, preferredFirst?: string): string[] {
-  // pick UNIQUE words for each row
-  const poolAll = Array.from(new Set(WORDS[size] ?? []));
+  // Use only words that exactly match the requested size.
+  const raw = WORDS[size] ?? [];
+  const poolAll = Array.from(new Set(raw.filter((w) => typeof w === 'string' && w.length === size)));
   const words: string[] = [];
 
-  // optional preferred first word (validated to size by pickWord)
+  // If a preferred word is provided, only accept it if it matches the size.
   if (preferredFirst) {
     const first = pickWord(size, preferredFirst);
-    if (!words.includes(first)) words.push(first);
-    const idxIn = poolAll.indexOf(first);
-    if (idxIn >= 0) poolAll.splice(idxIn, 1);
+    if (first.length === size && !words.includes(first)) {
+      words.push(first);
+      const i = poolAll.indexOf(first);
+      if (i >= 0) poolAll.splice(i, 1);
+    }
   }
-  // shuffle pool and take without replacement
+
+  // Shuffle then take unique words without replacement.
   for (let i = poolAll.length - 1; i > 0; i--) {
     const j = rand(i + 1); const t = poolAll[i]; poolAll[i] = poolAll[j]; poolAll[j] = t;
   }
   while (words.length < size && poolAll.length) words.push(poolAll.pop()!);
 
-  // Fallback safety (should not happen with provided lists)
-  const fallback = WORDS[size] ?? [];
+  // Strong fallback: still ensure size-correct.
+  const fallback = raw.filter((w) => w.length === size);
   let guard = 0;
-  while (words.length < size && guard < 1000) {
-    const w = fallback[rand(fallback.length)] || pickWord(size);
+  while (words.length < size && fallback.length && guard < 1000) {
+    const w = fallback[rand(fallback.length)];
     if (!words.includes(w)) words.push(w);
     guard++;
   }
@@ -822,7 +826,7 @@ function ArrowIcon({ dir, size = 34, color = "#111", stroke = 2.5 }: { dir: "h" 
 function LegendBox({ color, icon, iconNode, label, compact = false }: { color: string; icon?: string; iconNode?: ReactNode; label: string; compact?: boolean }) {
   const containerCls = compact ? "flex items-center justify-center p-0" : "flex items-center gap-2 p-1";
   return (
-    <div className={containerCls}>
+    <div className={containerCls} role="group" aria-label={label}>
       {/* Icon tile styled exactly like a game tile (border + 3D shadow + gloss) */}
       <div
         className={`relative w-14 h-14 sm:w-16 sm:h-16 rounded-xl ${color} border border-neutral-300 shadow-[0_4px_0_rgba(0,0,0,.18)] flex items-center justify-center leading-none`}
@@ -830,58 +834,44 @@ function LegendBox({ color, icon, iconNode, label, compact = false }: { color: s
       >
         <span className="pointer-events-none absolute inset-0 rounded-xl" style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.0) 60%)' }} />
         {iconNode ? (
-          <span className="flex items-center justify-center">{iconNode}</span>
-        ) : (<span className="text-neutral-900 text-2xl">{icon ?? ""}</span>
+          iconNode
+        ) : (
+          <span className="text-2xl font-black select-none">{icon}</span>
         )}
       </div>
-      {!compact && (
-        <span className="ml-2 text-sm">{label}</span>
-      )}
+      {!compact && <span className="text-sm select-none">{label}</span>}
     </div>
   );
 }
 
-// Simple 2-row tile logo: WORD (all green) / GAMI (GAM green, I orange)
+function AdBox({ variant }: { variant: "banner" | "skyscraper" }) {
+  const dims = variant === "banner" ? "w-full h-24" : "w-40 h-[300px]";
+  return (
+    <div className={`${dims} border border-neutral-300 bg-neutral-50 text-neutral-500 rounded-xl flex items-center justify-center select-none`}>Ad Placeholder</div>
+  );
+}
+
 function LogoMark() {
-  const TileBox = ({ ch, bg }: { ch: string; bg: string }) => (
-    <div
-      className={`relative w-9 h-9 sm:w-10 sm:h-10 rounded-lg ${bg} border border-neutral-300 shadow-[0_4px_0_rgba(0,0,0,.18)] flex items-center justify-center font-extrabold`}
-    >
-      <span
-        className="pointer-events-none absolute inset-0 rounded-lg"
-        style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.0) 60%)' }}
-      />
-      <span className="text-neutral-900">{ch}</span>
+  const tileBase = "relative w-10 h-10 sm:w-12 sm:h-12 rounded-xl border border-neutral-300 shadow-[0_4px_0_rgba(0,0,0,.18)] flex items-center justify-center text-sm sm:text-base font-extrabold";
+  const gloss = <span className="pointer-events-none absolute inset-0 rounded-xl" style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.0) 60%)' }} />;
+  const Tile = ({ ch, color }: { ch: string; color: string }) => (
+    <div className={`${tileBase} ${color}`}>
+      {gloss}
+      {ch}
     </div>
   );
   return (
-    <div className="inline-grid grid-cols-4 gap-1.5" aria-hidden>
-      {/* Row 1 */}
-      <TileBox ch="W" bg="bg-green-300" />
-      <TileBox ch="O" bg="bg-green-300" />
-      <TileBox ch="R" bg="bg-green-300" />
-      <TileBox ch="D" bg="bg-green-300" />
-      {/* Row 2 */}
-      <TileBox ch="G" bg="bg-green-300" />
-      <TileBox ch="A" bg="bg-green-300" />
-      <TileBox ch="M" bg="bg-green-300" />
-      <TileBox ch="I" bg="bg-orange-300" />
-    </div>
-  );
-}
-
-// Placeholder ad blocks used during development / before AdSense wiring
-function AdBox({ variant }: { variant: 'banner' | 'skyscraper' }) {
-  if (variant === 'skyscraper') {
-    return (
-      <div className="w-40 h-[600px] rounded-xl border border-neutral-300 bg-neutral-100 flex items-center justify-center text-neutral-500 text-sm select-none">
-        Ad Placeholder
-      </div>
-    );
-  }
-  return (
-    <div className="w-full h-24 rounded-xl border border-neutral-300 bg-neutral-100 flex items-center justify-center text-neutral-500 text-sm select-none">
-      Ad Placeholder
+    <div className="grid grid-cols-4 gap-2">
+      {/* WORD */}
+      <Tile ch="W" color="bg-green-300" />
+      <Tile ch="O" color="bg-green-300" />
+      <Tile ch="R" color="bg-green-300" />
+      <Tile ch="D" color="bg-green-300" />
+      {/* GAMI */}
+      <Tile ch="G" color="bg-green-300" />
+      <Tile ch="A" color="bg-green-300" />
+      <Tile ch="M" color="bg-green-300" />
+      <Tile ch="I" color="bg-orange-300" />
     </div>
   );
 }
