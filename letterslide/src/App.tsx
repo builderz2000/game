@@ -136,6 +136,7 @@ export default function App() {
   const [isTouch, setIsTouch] = useState(initialTouch);
   const [showInterAd, setShowInterAd] = useState(false);
   const [pendingStart, setPendingStart] = useState<{ size: number; word?: string } | null>(null);
+  const INTERSTITIAL_ENABLED = false; // toggle true to re-enable the interstitial
 
   useEffect(() => { setIsTouch((("ontouchstart" in window) || (navigator as any).maxTouchPoints > 0)); }, []);
   useEffect(() => { try { document.title = "WORDGAMI"; } catch {} }, []);
@@ -209,7 +210,16 @@ export default function App() {
     setRowSecrets(nextCamp.words.map((w) => ({ word: w }))); setLockedRows(new Set()); rewardedGreen.current = new Set(); setScore(SCORE_START); setHideWin(false);
   }
 
-  function queueNewGame(newSize = size, maybeWord?: string) { setPendingStart({ size: newSize, word: maybeWord }); setShowInterAd(true); }
+  function queueNewGame(newSize = size, maybeWord?: string) {
+    if (INTERSTITIAL_ENABLED) {
+      // existing flow: stage next game and show interstitial
+      setPendingStart({ size: newSize, word: maybeWord });
+      setShowInterAd(true);
+    } else {
+      // direct start: skip interstitial entirely
+      startGame(newSize, maybeWord);
+    }
+  }
 
   function handleTileClick(i: number) {
     if (won || lost) return; const r = rc(i, size).r; if (isRowLocked(r)) return;
