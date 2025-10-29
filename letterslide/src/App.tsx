@@ -330,7 +330,7 @@ export default function App() {
                 onPointerUp={isTouch ? (e) => { const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null; let ii: number | null = null; let n: HTMLElement | null = el; while (n && ii == null) { const v = n.getAttribute?.('data-index'); if (v != null) ii = parseInt(v, 10); n = n.parentElement as HTMLElement | null; } if (dragIndex != null && ii != null && ii !== dragIndex && canSwapIndices(dragIndex, ii)) performSwap(dragIndex, ii); setDragIndex(null); setSelectedIndex(null); } : undefined}
                 onPointerCancel={isTouch ? () => setDragIndex(null) : undefined}
                 onClick={() => handleTileClick(i)} style={{ ...styleTrans, ...styleAnim }}
-                className={`relative aspect-square ${tileBoxCls} ${base} text-xl font-bold ${isSel ? "ring-2 ring-sky-500" : canSwap ? "ring-2 ring-sky-300" : ""} ${locked ? "cursor-not-allowed pointer-events-none opacity-95" : "cursor-pointer"}`}>
+                className={`relative aspect-square ${tileBoxCls} ${base} text-xl font-bold ${isSel ? "ring-2 ring-sky-500" : canSwap ? "{/*ring-2 ring-sky-300*/}" : ""} ${locked ? "cursor-not-allowed pointer-events-none opacity-95" : "cursor-pointer"}`}>
                 <span className="pointer-events-none absolute inset-0 rounded-xl" style={tileGloss} />
                 {t.char}
                 {locked && <span className="absolute top-1 right-1 text-xs opacity-70">🔒</span>}
