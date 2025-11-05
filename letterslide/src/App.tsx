@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import GamesMenu from "./GamesMenu"; // adjust path if needed
+
 
 
 // WORDGAMI — compact, production-ready App
@@ -472,8 +472,8 @@ function AdBox({ variant, pos }: { variant: "banner" | "skyscraper"; pos?: "left
   const AD_SLOTS: { banner: string; skyscraper: { left: string; right: string } } = {
     banner: "6868449269",           // your banner slot (unchanged)
     skyscraper: {
-      left:  "YOUR_LEFT_SLOT_ID",   // <— replace with real slot ID
-      right: "YOUR_RIGHT_SLOT_ID",  // <— replace with real slot ID
+      left:  "8220510644",   // <— replace with real slot ID
+      right: "7501383396",  // <— replace with real slot ID
     },
   };
 
