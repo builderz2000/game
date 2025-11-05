@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import GamesMenu from "./GamesMenu"; // adjust path if needed
+
 
 // WORDGAMI — compact, production-ready App
 // - Free-solve any row; live coloring with duplicate-safe counts
@@ -244,8 +246,13 @@ export default function App() {
     <div className={`min-h-screen w-full overflow-x-hidden ${"bg-white text-neutral-900"}`}>
       <style>{GLOBAL_CSS}</style>
       {/* Fixed desktop ad placeholders */}
-      <div className="hidden lg:block fixed left-4 top-28 z-10"><AdBox variant="skyscraper" /></div>
-      <div className="hidden lg:block fixed right-4 top-28 z-10"><AdBox variant="skyscraper" /></div>
+      <div className="hidden lg:block fixed left-4 top-28 z-10">
+        <AdBox variant="skyscraper" pos="left" />
+      </div>
+      <div className="hidden lg:block fixed right-4 top-28 z-10">
+        <AdBox variant="skyscraper" pos="right" />
+      </div>
+
       <div className="max-w-3xl mx-auto p-4 select-none">
         {/* Intro overlay */}
         {showIntro && (
@@ -453,35 +460,87 @@ function LegendBox({ color, icon, iconNode, label, compact = false }: { color: s
 }
 
 // --------- AdBox (placeholder / AdSense slot container)
-function AdBox({ variant }: { variant: "banner" | "skyscraper" }) {
+// BEFORE:
+// function AdBox({ variant }: { variant: "banner" | "skyscraper" }) {
+
+// AFTER:
+function AdBox({ variant, pos }: { variant: "banner" | "skyscraper"; pos?: "left" | "right" }) {
+  // Keep your publisher ID wherever you already define it (global or here).
   const ADSENSE_CLIENT = "ca-pub-7073157492816428";
-  const AD_SLOTS = { banner: "0000000000", skyscraper: "0000000000" } as const; // replace with real slots
+
+  // Use distinct slot IDs for left/right. Keep your existing banner slot.
+  const AD_SLOTS: { banner: string; skyscraper: { left: string; right: string } } = {
+    banner: "6868449269",           // your banner slot (unchanged)
+    skyscraper: {
+      left:  "YOUR_LEFT_SLOT_ID",   // <— replace with real slot ID
+      right: "YOUR_RIGHT_SLOT_ID",  // <— replace with real slot ID
+    },
+  };
+
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const [wh, setWH] = useState<{ w: number; h: number }>(() => variant === "banner" ? { w: 728, h: 90 } : { w: 160, h: 600 });
+  const [wh, setWH] = useState<{ w: number; h: number }>(() =>
+    variant === "banner" ? { w: 728, h: 90 } : { w: 160, h: 600 }
+  );
 
   useEffect(() => {
     const compute = () => {
-      const base = variant === "banner" ? (window.innerWidth < 768 ? { w: 320, h: 50 } : { w: 728, h: 90 }) : { w: 160, h: 600 };
-      const host = hostRef.current; const maxW = host?.clientWidth || base.w; const w = Math.min(base.w, maxW); const h = variant === "banner" ? Math.round(base.h * (w / base.w)) : base.h; setWH({ w, h });
+      const base =
+        variant === "banner"
+          ? (window.innerWidth < 768 ? { w: 320, h: 50 } : { w: 728, h: 90 })
+          : { w: 160, h: 600 };
+      const host = hostRef.current;
+      const maxW = host?.clientWidth || base.w;
+      const w = Math.min(base.w, maxW);
+      const h = variant === "banner" ? Math.round(base.h * (w / base.w)) : base.h;
+      setWH({ w, h });
     };
-    compute(); window.addEventListener('resize', compute); return () => window.removeEventListener('resize', compute);
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
   }, [variant]);
 
   useEffect(() => {
-    const host = hostRef.current; if (!host) return; host.innerHTML = "";
-    const adsbygoogle = (window as any).adsbygoogle;
-    if (Array.isArray(adsbygoogle)) {
-      const ins = document.createElement('ins');
-      ins.className = 'adsbygoogle'; ins.style.display = 'inline-block'; ins.style.width = `${wh.w}px`; ins.style.height = `${wh.h}px`;
-      ins.setAttribute('data-ad-client', ADSENSE_CLIENT); ins.setAttribute('data-ad-slot', AD_SLOTS[variant]); ins.setAttribute('data-ad-format', 'auto'); ins.setAttribute('data-full-width-responsive', 'true');
-      host.appendChild(ins); try { adsbygoogle.push({}); } catch {}
-    } else {
-      const ph = document.createElement('div'); ph.style.width = `${wh.w}px`; ph.style.height = `${wh.h}px`; ph.className = 'flex items-center justify-center rounded-xl border bg-white border-neutral-300 text-neutral-500 text-sm'; ph.textContent = 'Placeholder'; host.appendChild(ph);
-    }
-  }, [variant, wh.w, wh.h]);
+    const host = hostRef.current;
+    if (!host) return;
+    host.innerHTML = "";
 
-  return <div ref={hostRef} className="mx-auto" style={{ width: '100%', maxWidth: wh.w, minHeight: wh.h }} />;
+    const slot =
+      variant === "banner" ? AD_SLOTS.banner : AD_SLOTS.skyscraper[pos ?? "left"];
+
+    const noSlot = !slot || /^(0+)$/.test(slot);
+    if (noSlot) {
+      const ph = document.createElement("div");
+      ph.style.width = `${wh.w}px`;
+      ph.style.height = `${wh.h}px`;
+      ph.className =
+        "flex items-center justify-center rounded-xl border bg-white border-neutral-300 text-neutral-500 text-sm";
+      ph.textContent = "Ad placeholder — add your data-ad-slot";
+      host.appendChild(ph);
+      return;
+    }
+
+    const ins = document.createElement("ins");
+    ins.className = "adsbygoogle";
+    ins.style.display = "inline-block";
+    ins.style.width = `${wh.w}px`;
+    ins.style.height = `${wh.h}px`;
+    ins.setAttribute("data-ad-client", ADSENSE_CLIENT);
+    ins.setAttribute("data-ad-slot", String(slot));
+    ins.setAttribute("data-ad-format", "auto");
+    ins.setAttribute("data-full-width-responsive", "true");
+    host.appendChild(ins);
+
+    try {
+      (window as any).adsbygoogle = (window as any).adsbygoogle || [];
+      (window as any).adsbygoogle.push({});
+    } catch {}
+  }, [variant, pos, wh.w, wh.h]);
+
+  return (
+    <div ref={hostRef} className="mx-auto" style={{ width: "100%", maxWidth: wh.w, minHeight: wh.h }} />
+  );
 }
+
 
 // --------- Logo used in header / popups
 function LogoMark() {
